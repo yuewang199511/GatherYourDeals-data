@@ -39,7 +39,9 @@ func setupEnv(t *testing.T) *testEnv {
 	ctx := context.Background()
 
 	// Seed a test client
-	clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "test-client", Secret: "", Domain: ""})
+	if err := clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "test-client", Secret: "", Domain: ""}); err != nil {
+		t.Fatalf("CreateClient failed: %v", err)
+	}
 
 	authService := auth.NewService(userRepo)
 
@@ -129,7 +131,9 @@ func TestRegister_Success(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
 	if resp["username"] != "alice" {
 		t.Errorf("expected username 'alice', got '%s'", resp["username"])
 	}
@@ -275,7 +279,9 @@ func TestAdminListClients(t *testing.T) {
 	}
 
 	var clients []map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &clients)
+	if err := json.Unmarshal(w.Body.Bytes(), &clients); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
 	if len(clients) < 1 {
 		t.Fatal("expected at least 1 client")
 	}
@@ -287,7 +293,9 @@ func TestAdminDeleteClient(t *testing.T) {
 
 	// Create a client to delete
 	ctx := context.Background()
-	env.clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "to-delete", Secret: "", Domain: ""})
+	if err := env.clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "to-delete", Secret: "", Domain: ""}); err != nil {
+		t.Fatalf("CreateClient failed: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/clients/to-delete", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

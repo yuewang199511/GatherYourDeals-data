@@ -14,6 +14,6 @@ func NewTestDB(t *testing.T) *sqlite.DB {
 	if err != nil {
 		t.Fatalf("failed to create test database: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }

@@ -6,7 +6,7 @@ This is the data service for the GatherYourDeals project. It provides a server f
 
 ### Prerequisites
 
-- Go 1.23 or later
+- Go 1.25.5
 - GCC (required by the SQLite driver)
 
 ### Build

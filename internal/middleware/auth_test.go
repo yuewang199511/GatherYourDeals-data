@@ -31,7 +31,9 @@ func setupTestEnv(t *testing.T, role model.Role) (*manage.Manager, *sqlite.UserR
 	ctx := context.Background()
 
 	// Create a test client
-	clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "test-client", Secret: "", Domain: ""})
+	if err := clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "test-client", Secret: "", Domain: ""}); err != nil {
+		t.Fatalf("CreateClient failed: %v", err)
+	}
 
 	// Create a test user
 	authService := auth.NewService(userRepo)

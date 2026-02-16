@@ -36,7 +36,9 @@ func TestCreateAdmin_AlreadyExists(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	svc.CreateAdmin(ctx, "admin", "password123")
+	if _, err := svc.CreateAdmin(ctx, "admin", "password123"); err != nil {
+		t.Fatalf("first CreateAdmin failed: %v", err)
+	}
 
 	_, err := svc.CreateAdmin(ctx, "admin2", "password456")
 	if err != auth.ErrAdminExists {
@@ -67,7 +69,9 @@ func TestRegister_DuplicateUsername(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	svc.Register(ctx, "alice", "password123")
+	if _, err := svc.Register(ctx, "alice", "password123"); err != nil {
+		t.Fatalf("first Register failed: %v", err)
+	}
 
 	_, err := svc.Register(ctx, "alice", "password456")
 	if err != auth.ErrUsernameExists {
@@ -79,7 +83,9 @@ func TestLogin_Success(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	svc.Register(ctx, "alice", "password123")
+	if _, err := svc.Register(ctx, "alice", "password123"); err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
 
 	user, err := svc.Login(ctx, "alice", "password123")
 	if err != nil {
@@ -94,7 +100,9 @@ func TestLogin_WrongPassword(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	svc.Register(ctx, "alice", "password123")
+	if _, err := svc.Register(ctx, "alice", "password123"); err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
 
 	_, err := svc.Login(ctx, "alice", "wrongpassword")
 	if err != auth.ErrInvalidCredential {
@@ -116,15 +124,16 @@ func TestResetPassword(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	svc.Register(ctx, "alice", "oldpassword1")
+	if _, err := svc.Register(ctx, "alice", "oldpassword1"); err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
 
-	err := svc.ResetPassword(ctx, "alice", "newpassword1")
-	if err != nil {
+	if err := svc.ResetPassword(ctx, "alice", "newpassword1"); err != nil {
 		t.Fatalf("ResetPassword failed: %v", err)
 	}
 
 	// Old password should fail
-	_, err = svc.Login(ctx, "alice", "oldpassword1")
+	_, err := svc.Login(ctx, "alice", "oldpassword1")
 	if err != auth.ErrInvalidCredential {
 		t.Fatal("expected old password to fail after reset")
 	}
@@ -161,7 +170,9 @@ func TestHasAdmin(t *testing.T) {
 		t.Fatal("expected no admin")
 	}
 
-	svc.CreateAdmin(ctx, "admin", "password123")
+	if _, err := svc.CreateAdmin(ctx, "admin", "password123"); err != nil {
+		t.Fatalf("CreateAdmin failed: %v", err)
+	}
 
 	has, err = svc.HasAdmin(ctx)
 	if err != nil {

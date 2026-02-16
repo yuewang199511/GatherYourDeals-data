@@ -9,6 +9,13 @@ import (
 	"github.com/gatheryourdeals/data/internal/repository/sqlite/testutil"
 )
 
+func mustCreateClient(t *testing.T, repo *sqlite.ClientRepo, ctx context.Context, client *model.OAuthClient) {
+	t.Helper()
+	if err := repo.CreateClient(ctx, client); err != nil {
+		t.Fatalf("CreateClient failed: %v", err)
+	}
+}
+
 func TestCreateClient(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := sqlite.NewClientRepo(db)
@@ -20,9 +27,7 @@ func TestCreateClient(t *testing.T) {
 		Domain: "http://localhost",
 	}
 
-	if err := repo.CreateClient(ctx, client); err != nil {
-		t.Fatalf("CreateClient failed: %v", err)
-	}
+	mustCreateClient(t, repo, ctx, client)
 
 	got, err := repo.GetClientByID(ctx, "test-client")
 	if err != nil {
@@ -47,9 +52,7 @@ func TestCreateClient_DuplicateID(t *testing.T) {
 	c1 := &model.OAuthClient{ID: "client-1", Secret: "", Domain: ""}
 	c2 := &model.OAuthClient{ID: "client-1", Secret: "other", Domain: ""}
 
-	if err := repo.CreateClient(ctx, c1); err != nil {
-		t.Fatalf("first CreateClient failed: %v", err)
-	}
+	mustCreateClient(t, repo, ctx, c1)
 	err := repo.CreateClient(ctx, c2)
 	if err == nil {
 		t.Fatal("expected error on duplicate client ID, got nil")
@@ -75,8 +78,8 @@ func TestListClients(t *testing.T) {
 	repo := sqlite.NewClientRepo(db)
 	ctx := context.Background()
 
-	repo.CreateClient(ctx, &model.OAuthClient{ID: "c1", Secret: "", Domain: ""})
-	repo.CreateClient(ctx, &model.OAuthClient{ID: "c2", Secret: "", Domain: ""})
+	mustCreateClient(t, repo, ctx, &model.OAuthClient{ID: "c1", Secret: "", Domain: ""})
+	mustCreateClient(t, repo, ctx, &model.OAuthClient{ID: "c2", Secret: "", Domain: ""})
 
 	clients, err := repo.ListClients(ctx)
 	if err != nil {
@@ -92,13 +95,16 @@ func TestDeleteClient(t *testing.T) {
 	repo := sqlite.NewClientRepo(db)
 	ctx := context.Background()
 
-	repo.CreateClient(ctx, &model.OAuthClient{ID: "c1", Secret: "", Domain: ""})
+	mustCreateClient(t, repo, ctx, &model.OAuthClient{ID: "c1", Secret: "", Domain: ""})
 
 	if err := repo.DeleteClient(ctx, "c1"); err != nil {
 		t.Fatalf("DeleteClient failed: %v", err)
 	}
 
-	got, _ := repo.GetClientByID(ctx, "c1")
+	got, err := repo.GetClientByID(ctx, "c1")
+	if err != nil {
+		t.Fatalf("GetClientByID failed: %v", err)
+	}
 	if got != nil {
 		t.Fatal("expected nil after delete, got client")
 	}
@@ -117,7 +123,7 @@ func TestHasClients(t *testing.T) {
 		t.Fatal("expected no clients on empty database")
 	}
 
-	repo.CreateClient(ctx, &model.OAuthClient{ID: "c1", Secret: "", Domain: ""})
+	mustCreateClient(t, repo, ctx, &model.OAuthClient{ID: "c1", Secret: "", Domain: ""})
 
 	has, err = repo.HasClients(ctx)
 	if err != nil {

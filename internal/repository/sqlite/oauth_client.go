@@ -51,7 +51,7 @@ func (r *ClientRepo) ListClients(ctx context.Context) ([]*model.OAuthClient, err
 	if err != nil {
 		return nil, fmt.Errorf("list clients: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var clients []*model.OAuthClient
 	for rows.Next() {

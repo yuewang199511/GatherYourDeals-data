@@ -10,12 +10,19 @@ import (
 	"github.com/gatheryourdeals/data/internal/repository/sqlite/testutil"
 )
 
+func mustCreateTestClient(t *testing.T, repo *sqlite.ClientRepo, ctx context.Context, client *model.OAuthClient) {
+	t.Helper()
+	if err := repo.CreateClient(ctx, client); err != nil {
+		t.Fatalf("CreateClient failed: %v", err)
+	}
+}
+
 func TestDBClientStore_GetByID_Found(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	clientRepo := sqlite.NewClientRepo(db)
 	ctx := context.Background()
 
-	clientRepo.CreateClient(ctx, &model.OAuthClient{
+	mustCreateTestClient(t, clientRepo, ctx, &model.OAuthClient{
 		ID:     "test-client",
 		Secret: "secret123",
 		Domain: "http://localhost",
@@ -65,20 +72,23 @@ func TestDBClientStore_ReflectsChanges(t *testing.T) {
 	store := auth.NewDBClientStore(clientRepo)
 
 	// Client doesn't exist yet
-	info, _ := store.GetByID(ctx, "new-client")
+	info, err := store.GetByID(ctx, "new-client")
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
 	if info != nil {
 		t.Fatal("expected nil before creation")
 	}
 
 	// Create via repo (simulates admin API)
-	clientRepo.CreateClient(ctx, &model.OAuthClient{
+	mustCreateTestClient(t, clientRepo, ctx, &model.OAuthClient{
 		ID:     "new-client",
 		Secret: "",
 		Domain: "",
 	})
 
 	// Store should see it immediately
-	info, err := store.GetByID(ctx, "new-client")
+	info, err = store.GetByID(ctx, "new-client")
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
@@ -87,10 +97,15 @@ func TestDBClientStore_ReflectsChanges(t *testing.T) {
 	}
 
 	// Delete via repo (simulates admin API)
-	clientRepo.DeleteClient(ctx, "new-client")
+	if err := clientRepo.DeleteClient(ctx, "new-client"); err != nil {
+		t.Fatalf("DeleteClient failed: %v", err)
+	}
 
 	// Store should no longer see it
-	info, _ = store.GetByID(ctx, "new-client")
+	info, err = store.GetByID(ctx, "new-client")
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
 	if info != nil {
 		t.Fatal("expected nil after deletion")
 	}

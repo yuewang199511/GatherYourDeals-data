@@ -61,7 +61,7 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			userRepo := sqlite.NewUserRepo(db)
 			clientRepo := sqlite.NewClientRepo(db)
@@ -137,7 +137,7 @@ func initCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			userRepo := sqlite.NewUserRepo(db)
 			svc := auth.NewService(userRepo)
@@ -205,7 +205,7 @@ func resetPasswordCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			userRepo := sqlite.NewUserRepo(db)
 			svc := auth.NewService(userRepo)

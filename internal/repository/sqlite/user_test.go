@@ -9,6 +9,13 @@ import (
 	"github.com/gatheryourdeals/data/internal/repository/sqlite/testutil"
 )
 
+func mustCreateUser(t *testing.T, repo *sqlite.UserRepo, ctx context.Context, user *model.User) {
+	t.Helper()
+	if err := repo.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+}
+
 func TestCreateUser(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := sqlite.NewUserRepo(db)
@@ -21,10 +28,7 @@ func TestCreateUser(t *testing.T) {
 		Role:         model.RoleUser,
 	}
 
-	err := repo.CreateUser(ctx, user)
-	if err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
+	mustCreateUser(t, repo, ctx, user)
 
 	got, err := repo.GetUserByID(ctx, "user-1")
 	if err != nil {
@@ -49,9 +53,7 @@ func TestCreateUser_DuplicateUsername(t *testing.T) {
 	user1 := &model.User{ID: "u1", Username: "alice", PasswordHash: "h1", Role: model.RoleUser}
 	user2 := &model.User{ID: "u2", Username: "alice", PasswordHash: "h2", Role: model.RoleUser}
 
-	if err := repo.CreateUser(ctx, user1); err != nil {
-		t.Fatalf("first CreateUser failed: %v", err)
-	}
+	mustCreateUser(t, repo, ctx, user1)
 	err := repo.CreateUser(ctx, user2)
 	if err == nil {
 		t.Fatal("expected error on duplicate username, got nil")
@@ -64,9 +66,7 @@ func TestGetUserByUsername(t *testing.T) {
 	ctx := context.Background()
 
 	user := &model.User{ID: "u1", Username: "bob", PasswordHash: "h", Role: model.RoleAdmin}
-	if err := repo.CreateUser(ctx, user); err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
+	mustCreateUser(t, repo, ctx, user)
 
 	got, err := repo.GetUserByUsername(ctx, "bob")
 	if err != nil {
@@ -100,15 +100,16 @@ func TestUpdatePassword(t *testing.T) {
 	ctx := context.Background()
 
 	user := &model.User{ID: "u1", Username: "alice", PasswordHash: "old", Role: model.RoleUser}
-	if err := repo.CreateUser(ctx, user); err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
+	mustCreateUser(t, repo, ctx, user)
 
 	if err := repo.UpdatePassword(ctx, "u1", "new"); err != nil {
 		t.Fatalf("UpdatePassword failed: %v", err)
 	}
 
-	got, _ := repo.GetUserByID(ctx, "u1")
+	got, err := repo.GetUserByID(ctx, "u1")
+	if err != nil {
+		t.Fatalf("GetUserByID failed: %v", err)
+	}
 	if got.PasswordHash != "new" {
 		t.Errorf("expected password hash 'new', got '%s'", got.PasswordHash)
 	}
@@ -119,8 +120,8 @@ func TestListUsers(t *testing.T) {
 	repo := sqlite.NewUserRepo(db)
 	ctx := context.Background()
 
-	repo.CreateUser(ctx, &model.User{ID: "u1", Username: "alice", PasswordHash: "h", Role: model.RoleUser})
-	repo.CreateUser(ctx, &model.User{ID: "u2", Username: "bob", PasswordHash: "h", Role: model.RoleAdmin})
+	mustCreateUser(t, repo, ctx, &model.User{ID: "u1", Username: "alice", PasswordHash: "h", Role: model.RoleUser})
+	mustCreateUser(t, repo, ctx, &model.User{ID: "u2", Username: "bob", PasswordHash: "h", Role: model.RoleAdmin})
 
 	users, err := repo.ListUsers(ctx)
 	if err != nil {
@@ -136,13 +137,16 @@ func TestDeleteUser(t *testing.T) {
 	repo := sqlite.NewUserRepo(db)
 	ctx := context.Background()
 
-	repo.CreateUser(ctx, &model.User{ID: "u1", Username: "alice", PasswordHash: "h", Role: model.RoleUser})
+	mustCreateUser(t, repo, ctx, &model.User{ID: "u1", Username: "alice", PasswordHash: "h", Role: model.RoleUser})
 
 	if err := repo.DeleteUser(ctx, "u1"); err != nil {
 		t.Fatalf("DeleteUser failed: %v", err)
 	}
 
-	got, _ := repo.GetUserByID(ctx, "u1")
+	got, err := repo.GetUserByID(ctx, "u1")
+	if err != nil {
+		t.Fatalf("GetUserByID failed: %v", err)
+	}
 	if got != nil {
 		t.Fatal("expected nil after delete, got user")
 	}
@@ -161,7 +165,7 @@ func TestHasAdmin(t *testing.T) {
 		t.Fatal("expected no admin on empty database")
 	}
 
-	repo.CreateUser(ctx, &model.User{ID: "u1", Username: "admin", PasswordHash: "h", Role: model.RoleAdmin})
+	mustCreateUser(t, repo, ctx, &model.User{ID: "u1", Username: "admin", PasswordHash: "h", Role: model.RoleAdmin})
 
 	has, err = repo.HasAdmin(ctx)
 	if err != nil {

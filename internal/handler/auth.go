@@ -7,8 +7,8 @@ import (
 	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/middleware"
 	"github.com/gatheryourdeals/data/internal/repository"
-	"github.com/go-oauth2/oauth2/v4/server"
 	"github.com/gin-gonic/gin"
+	"github.com/go-oauth2/oauth2/v4/server"
 )
 
 // AuthHandler handles HTTP requests for authentication endpoints.
@@ -68,14 +68,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // Token handles POST /api/v1/oauth/token
 // This is the standard OAuth2 token endpoint.
 // It handles both password credentials grant (login) and refresh token grant.
-//
-// For login, the client sends:
-//   grant_type=password&username=xxx&password=xxx&client_id=<registered_client_id>
-//
-// For refresh, the client sends:
-//   grant_type=refresh_token&refresh_token=xxx&client_id=<registered_client_id>
-//
-// If the client has a secret, it must also include client_secret in the request.
+// For login: grant_type=password&username=xxx&password=xxx&client_id=<id>
+// For refresh: grant_type=refresh_token&refresh_token=xxx&client_id=<id>
+// If the client has a secret, it must also include client_secret.
 // Clients are managed via the admin API and stored in the database.
 func (h *AuthHandler) Token(c *gin.Context) {
 	err := h.oauthServer.HandleTokenRequest(c.Writer, c.Request)
