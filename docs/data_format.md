@@ -110,7 +110,7 @@ For each record, there will be these fields appended
 
 {
     "uploadTime": 1770620311,
-    "userSignature": "some generated string"
+    "userID": "registered user ID   "
 
 }
 

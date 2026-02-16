@@ -1,0 +1,16 @@
+server:
+  port: "8080"
+
+database:
+  path: "gatheryourdeals.db"
+
+oauth2:
+  access_token_exp: "1h"
+  refresh_token_exp: "168h"
+
+  # WARNING: Clients are only read from this file on first startup to seed the database.
+  # After that, manage clients via the admin API. Changes here have no effect after initialization.
+  clients:
+    - id: "gatheryourdeals"
+      secret: ""
+      domain: "http://localhost"

@@ -1,0 +1,379 @@
+openapi: 3.0.3
+info:
+  title: GatherYourDeals Data API
+  description: |
+    API for managing purchase data, user authentication, and OAuth2 client management.
+
+    ## Authentication
+
+    This API uses OAuth2 with the Resource Owner Password Credentials grant.
+
+    1. Register a user via `POST /users` (requires a valid `clientId`)
+    2. Obtain tokens via `POST /oauth/token` with `grant_type=password`
+    3. Include the access token in the `Authorization: Bearer <token>` header
+    4. Refresh tokens via `POST /oauth/token` with `grant_type=refresh_token`
+    5. Delete your session via `DELETE /oauth/sessions`
+
+  version: 0.1.0
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+
+tags:
+  - name: Users
+    description: User registration
+  - name: OAuth2
+    description: Token management and session lifecycle
+  - name: Admin - Clients
+    description: OAuth2 client management (admin only)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: OAuth2 access token
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      example:
+        error: "invalid username or password"
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        username:
+          type: string
+          example: "alice"
+        role:
+          type: string
+          enum: [admin, user]
+          example: "user"
+
+    OAuthTokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        token_type:
+          type: string
+          example: "Bearer"
+        expires_in:
+          type: integer
+          description: Seconds until the access token expires
+          example: 3600
+        refresh_token:
+          type: string
+          example: "dGhpcyBpcyBhIHJlZnJl..."
+
+    OAuthClient:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "mobile-app"
+        domain:
+          type: string
+          example: "https://mobile.example.com"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-02-16T12:00:00Z"
+
+paths:
+  /users:
+    post:
+      summary: Create a new user
+      description: |
+        Registers a new user account. The account is active immediately (open registration).
+        Requires a valid `clientId` from a registered OAuth2 client.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, clientId]
+              properties:
+                username:
+                  type: string
+                  example: "alice"
+                password:
+                  type: string
+                  minLength: 8
+                  example: "password123"
+                clientId:
+                  type: string
+                  description: A registered OAuth2 client ID
+                  example: "gatheryourdeals"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request (missing fields or password too short)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid client_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /oauth/token:
+    post:
+      summary: Obtain or refresh an access token
+      description: |
+        Standard OAuth2 token endpoint. Supports two grant types:
+
+        **Password grant (login):**
+        Send `grant_type=password` with `username`, `password`, and `client_id`.
+
+        **Refresh token grant:**
+        Send `grant_type=refresh_token` with `refresh_token` and `client_id`.
+
+        If the client has a secret, include `client_secret` as well.
+      tags: [OAuth2]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [password, refresh_token]
+                  example: "password"
+                client_id:
+                  type: string
+                  example: "gatheryourdeals"
+                client_secret:
+                  type: string
+                  description: Required if the client has a secret
+                username:
+                  type: string
+                  description: Required for grant_type=password
+                  example: "alice"
+                password:
+                  type: string
+                  description: Required for grant_type=password
+                  example: "password123"
+                refresh_token:
+                  type: string
+                  description: Required for grant_type=refresh_token
+            examples:
+              login:
+                summary: Login with username and password
+                value:
+                  grant_type: password
+                  client_id: gatheryourdeals
+                  username: alice
+                  password: password123
+              refresh:
+                summary: Refresh an expired access token
+                value:
+                  grant_type: refresh_token
+                  client_id: gatheryourdeals
+                  refresh_token: dGhpcyBpcyBhIHJlZnJl...
+      responses:
+        "200":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthTokenResponse"
+        "401":
+          description: Invalid credentials or client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /oauth/sessions:
+    delete:
+      summary: Delete current session
+      description: Revokes the access token used in this request, effectively logging out.
+      tags: [OAuth2]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "logged out"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/clients:
+    get:
+      summary: List all OAuth2 clients
+      description: Returns all registered OAuth2 clients. Admin only.
+      tags: [Admin - Clients]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of clients
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OAuthClient"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      summary: Register a new OAuth2 client
+      description: |
+        Creates a new OAuth2 client that can be used for token requests and user registration.
+        Admin only. Takes effect immediately without server restart.
+      tags: [Admin - Clients]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: string
+                  description: Unique client identifier
+                  example: "mobile-app"
+                secret:
+                  type: string
+                  description: Client secret (optional, leave empty for public clients)
+                  example: "my-secret"
+                domain:
+                  type: string
+                  description: Allowed redirect domain
+                  example: "https://mobile.example.com"
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthClient"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Client ID already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/clients/{id}:
+    delete:
+      summary: Revoke an OAuth2 client
+      description: |
+        Removes a registered OAuth2 client. Any tokens issued to this client
+        will still be valid until they expire, but no new tokens can be issued.
+        Admin only.
+      tags: [Admin - Clients]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The client ID to revoke
+          example: "mobile-app"
+      responses:
+        "200":
+          description: Client revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "client revoked"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
