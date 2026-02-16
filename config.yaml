@@ -1,0 +1,21 @@
+# GatherYourDeals server configuration
+
+server:
+  port: "8080"
+
+database:
+  path: "gatheryourdeals.db"
+
+oauth2:
+  access_token_exp: "1h"
+  refresh_token_exp: "168h"  # 7 days
+
+  clients:
+    - id: "gatheryourdeals-host"
+      secret: ""
+      domain: "http://localhost"
+
+    # Example: add more clients here
+    # - id: "mobile-app"
+    #   secret: "your-secret-here"
+    #   domain: "https://mobile.gatheryourdeals.com"

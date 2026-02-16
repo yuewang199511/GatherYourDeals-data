@@ -74,14 +74,13 @@ When the server starts for the first time with an empty database, it enters a se
 
 This is analogous to how a router or self-hosted application asks you to create an admin account on first use.
 
-## User Registration and Approval
+## User Registration
+
+Registration is open — any user can create an account and log in immediately.
 
 1. A new user calls `POST /api/v1/auth/register` with a username and password
-2. The server hashes the password and stores the account with a **pending** status
-3. The admin reviews and approves the account (or rejects it)
-4. Once approved, the user can log in
-
-💡💡💡 For simplicity, the admin could also directly create user accounts on their behalf, skipping the registration and approval flow.
+2. The server hashes the password and stores the account as an active user
+3. The user can log in right away
 
 ## Login and OAuth2 Token Flow
 
@@ -108,8 +107,6 @@ This means:
 
 Since we need to be our own OAuth2 provider (the server issues its own tokens), we have these options:
 
-### Option 1: go-oauth2/oauth2 (library approach)
-
 [go-oauth2/oauth2](https://github.com/go-oauth2/oauth2) is a Go library that embed directly into application. It provides the OAuth2 server logic (token generation, refresh, validation) and plug in your own user authentication and storage.
 
 # Recovery Scenarios
@@ -128,11 +125,12 @@ The core of recovery is still to ensure your staging data is not lost.
 
 Access keys serve a different purpose from user accounts. They are for **anonymous read-only access** — the social/follower model where people can follow your deals without needing a full account on your server.
 
-Only the admin can create and revoke access keys. Access keys are shared and not tied to individual users. Anyone with a valid access key and the server's address can read data, but never write.
+## about key creation and revoke
 
-This is analogous to a "anyone with the link can view" sharing model.
+1. Only the admin can create and revoke access keys. Access keys are shared and not tied to individual users. Anyone with a valid access key and the server's address can read data, but never write.
 
-If the admin wants to stop sharing, they revoke the key. This blocks all users of that key at once. To selectively block access, the admin would need to revoke the old key, create a new one, and share the new key with everyone except the person they want to block.
+
+2. If the admin wants to stop sharing, they revoke the key. This blocks all users of that key at once. To selectively block access, the admin would need to revoke the old key, create a new one, and share the new key with everyone except the person they want to block.
 
 # Summary of Authentication Methods
 
