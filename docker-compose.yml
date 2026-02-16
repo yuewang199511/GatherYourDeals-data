@@ -1,0 +1,24 @@
+# Docker Compose for local development.
+#
+# The config.yaml from the repo root is baked into the image.
+# The database file is persisted in a named volume.
+#
+# First-time setup:
+#   1. Run: docker compose run --rm app init
+#   2. Start the server: docker compose up --build
+#
+# To use a custom config, mount it over the default:
+#   volumes:
+#     - ./my-config.yaml:/data/config.yaml
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - gyd-data:/data
+    restart: unless-stopped
+
+volumes:
+  gyd-data:

@@ -1,0 +1,75 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ vars.GO_VERSION }}
+
+    - name: Install GCC (required by go-sqlite3)
+      run: sudo apt-get update && sudo apt-get install -y gcc
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build Linux binary
+      env:
+        CGO_ENABLED: "1"
+        GOOS: linux
+        GOARCH: amd64
+      run: go build -v -o bin/gatheryourdeals-linux-amd64 ./cmd/gatheryourdeals
+
+  # Cross-compilation with CGO requires platform-specific C compilers.
+  # These jobs run on the native OS to avoid cross-compilation issues.
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ vars.GO_VERSION }}
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build macOS binary
+      env:
+        CGO_ENABLED: "1"
+      run: go build -v -o bin/gatheryourdeals-darwin ./cmd/gatheryourdeals
+
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ vars.GO_VERSION }}
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build Windows binary
+      env:
+        CGO_ENABLED: "1"
+      run: go build -v -o bin/gatheryourdeals-windows.exe ./cmd/gatheryourdeals

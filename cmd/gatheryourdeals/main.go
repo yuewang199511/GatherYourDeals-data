@@ -12,9 +12,7 @@ import (
 	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/handler"
 	"github.com/gatheryourdeals/data/internal/model"
-	mw "github.com/gatheryourdeals/data/internal/middleware"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
-	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -30,7 +28,11 @@ func main() {
 		Short: "GatherYourDeals data service",
 	}
 
-	root.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to the config file")
+	defaultConfig := os.Getenv("GYD_CONFIG")
+	if defaultConfig == "" {
+		defaultConfig = "config.yaml"
+	}
+	root.PersistentFlags().StringVar(&configPath, "config", defaultConfig, "path to the config file")
 	root.PersistentFlags().StringVar(&dbPath, "db", "", "path to the SQLite database file (overrides config)")
 
 	root.AddCommand(serveCmd())
@@ -53,11 +55,7 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			// CLI flag overrides config file
-			dbFile := cfg.Database.Path
-			if dbPath != "" {
-				dbFile = dbPath
-			}
+			dbFile := resolveDBPath()
 
 			db, err := sqlite.New(dbFile)
 			if err != nil {
@@ -92,29 +90,7 @@ func serveCmd() *cobra.Command {
 
 			authHandler := handler.NewAuthHandler(authService, oauthServer, clientRepo)
 			adminHandler := handler.NewAdminHandler(clientRepo)
-
-			r := gin.Default()
-			v1 := r.Group("/api/v1")
-
-			// Public endpoints
-			v1.POST("/users", authHandler.Register)
-			v1.POST("/oauth/token", authHandler.Token)
-
-			// Protected endpoints (any authenticated user)
-			v1protected := v1.Group("")
-			v1protected.Use(mw.Auth(oauthManager, userRepo))
-			{
-				v1protected.DELETE("/oauth/sessions", authHandler.Logout)
-			}
-
-			// Admin-only endpoints
-			v1admin := v1.Group("/admin")
-			v1admin.Use(mw.Auth(oauthManager, userRepo), mw.RequireAdmin())
-			{
-				v1admin.POST("/clients", adminHandler.CreateClient)
-				v1admin.GET("/clients", adminHandler.ListClients)
-				v1admin.DELETE("/clients/:id", adminHandler.DeleteClient)
-			}
+			r := handler.NewRouter(authHandler, adminHandler, oauthManager, userRepo)
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
 			log.Printf("server starting on %s", addr)
@@ -276,10 +252,14 @@ func promptInput(label string) (string, error) {
 }
 
 // resolveDBPath returns the database path from the CLI flag if set,
-// otherwise from the config file, otherwise the default.
+// otherwise from the GYD_DB env var, otherwise from the config file,
+// otherwise the default.
 func resolveDBPath() string {
 	if dbPath != "" {
 		return dbPath
+	}
+	if envDB := os.Getenv("GYD_DB"); envDB != "" {
+		return envDB
 	}
 	cfg, err := config.Load(configPath)
 	if err == nil && cfg.Database.Path != "" {

@@ -1,0 +1,7 @@
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - goimports    # Handles formatting and import organization
+    - govet        # Basic static analysis for common bugs

@@ -1,5 +1,3 @@
-# GatherYourDeals server configuration
-
 server:
   port: "8080"
 
@@ -8,14 +6,11 @@ database:
 
 oauth2:
   access_token_exp: "1h"
-  refresh_token_exp: "168h"  # 7 days
+  refresh_token_exp: "168h"
 
+  # WARNING: Clients are only read from this file on first startup to seed the database.
+  # After that, manage clients via the admin API. Changes here have no effect after initialization.
   clients:
-    - id: "gatheryourdeals-host"
+    - id: "gatheryourdeals"
       secret: ""
       domain: "http://localhost"
-
-    # Example: add more clients here
-    # - id: "mobile-app"
-    #   secret: "your-secret-here"
-    #   domain: "https://mobile.gatheryourdeals.com"

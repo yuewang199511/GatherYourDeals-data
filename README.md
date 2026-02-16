@@ -2,7 +2,7 @@
 
 This is the data service for the GatherYourDeals project. It provides a server for storing and querying purchase data, with user authentication via OAuth2.
 
-## Quick Start
+## Quick Start (without Docker)
 
 ### Prerequisites
 
@@ -22,7 +22,7 @@ go build -o gatheryourdeals ./cmd/gatheryourdeals
 ./gatheryourdeals init
 ```
 
-Creates the database and prompts for an admin username and password.
+Creates the database and prompts for an admin username and password. The database file is created at the path specified in `config.yaml` (default: `gatheryourdeals.db` in the current directory).
 
 ### Run
 
@@ -32,9 +32,72 @@ Creates the database and prompts for an admin username and password.
 
 The server starts on the port configured in `config.yaml` (default: 8080). It will refuse to start if no admin account exists.
 
+### Admin Recovery
+
+If the admin forgets their password, reset it directly on the host machine:
+
+```bash
+./gatheryourdeals admin reset-password
+```
+
+This connects directly to the database — the server does not need to be running.
+
+## Quick Start (with Docker)
+
+### Prerequisites
+
+- Docker and Docker Compose
+
+### First-time setup
+
+```bash
+# Build the image and initialize the database.
+# This prompts for an admin username and password.
+docker compose run --rm app init
+```
+
+This creates the admin account and database inside a Docker volume (`gyd-data`). You only need to do this once.
+
+### Run
+
+```bash
+docker compose up --build
+```
+
+The server starts on port 8080. The `--build` flag ensures the image is rebuilt if the code has changed.
+
+### Stop
+
+```bash
+docker compose down
+```
+
+The database persists in the `gyd-data` volume. Next time you run `docker compose up --build`, everything is still there.
+
+### Admin Recovery (Docker)
+
+```bash
+docker compose run --rm app admin reset-password
+```
+
+### Custom Configuration
+
+The `config.yaml` at the repo root is baked into the Docker image. To override it without rebuilding, mount your own config:
+
+```yaml
+# docker-compose.yml
+services:
+  app:
+    volumes:
+      - gyd-data:/data
+      - ./my-config.yaml:/data/config.yaml
+```
+
 ## Configuration
 
-The server reads from `config.yaml` in the current directory by default. Use `--config` to specify a different path.
+The server reads `config.yaml` from the current directory by default. Override with `--config` flag or `GYD_CONFIG` environment variable.
+
+⚠️ Service will only read clients from database after first initialization
 
 ```yaml
 server:
@@ -53,7 +116,9 @@ oauth2:
       domain: "http://localhost"
 ```
 
-On first startup, clients from `config.yaml` are seeded into the database. After that, clients are managed via the admin API and persist across restarts.
+Server, database, and token expiry settings are read from `config.yaml` on every startup. Changes take effect on restart.
+
+⚠️ **OAuth2 clients are only read from `config.yaml` on first startup** to seed the database. After that, clients are managed exclusively via the admin API. Editing the `clients` section in `config.yaml` after initialization has no effect.
 
 ## CLI Commands
 
@@ -66,19 +131,9 @@ gatheryourdeals admin reset-password    # Reset a user's password
 ### Global flags
 
 ```
---config <path>    Path to config file (default: config.yaml)
+--config <path>    Path to config file (default: config.yaml, or GYD_CONFIG env var)
 --db <path>        Override database path from config
 ```
-
-## Admin Recovery
-
-If the admin forgets their password, reset it directly on the host machine:
-
-```bash
-./gatheryourdeals admin reset-password
-```
-
-This connects directly to the database — the server does not need to be running.
 
 ## API Reference
 
@@ -109,6 +164,7 @@ The full API specification is available in OpenAPI format:
 ## Key Features
 
 - **Single binary** — server and admin CLI in one executable
+- **Docker support** — multi-stage build, persistent volume for database
 - **OAuth2 authentication** — standard token flow with access and refresh tokens
 - **Dynamic client management** — add/revoke OAuth2 clients via admin API without restart
 - **SQLite with WAL mode** — lightweight, concurrent reads, no setup required
