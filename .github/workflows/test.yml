@@ -13,24 +13,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Go ${{ vars.GO_VERSION }}
+    - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ vars.GO_VERSION }}
-
-    - name: Install GCC (required by go-sqlite3)
-      run: sudo apt-get update && sudo apt-get install -y gcc
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ vars.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ vars.GO_VERSION }}-
-
-    - name: Download dependencies
-      run: go mod download
+        go-version-file: go.mod
 
     - name: Run tests
       env:

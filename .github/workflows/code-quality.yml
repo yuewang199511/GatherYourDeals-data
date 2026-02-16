@@ -17,15 +17,9 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ vars.GO_VERSION }}
-
-    - name: Install GCC (required by go-sqlite3)
-      run: sudo apt-get update && sudo apt-get install -y gcc
+        go-version-file: go.mod
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        # Automatically picks the latest compatible version.
-        # Or pin a specific version:
-        # version: v2.9.0
         args: --timeout=3m
