@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	oauth2 "github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/manage"
+	"github.com/go-oauth2/oauth2/v4/store"
 )
 
 func init() {
@@ -55,7 +56,8 @@ func setupTestEnv(t *testing.T, role model.Role) (*manage.Manager, *sqlite.UserR
 			RefreshTokenExp: "168h",
 		},
 	}
-	oauthManager, err := auth.NewOAuthManager(cfg, clientRepo)
+	tokenStore, _ := store.NewMemoryTokenStore()
+	oauthManager, err := auth.NewOAuthManager(cfg, clientRepo, tokenStore)
 	if err != nil {
 		t.Fatalf("failed to create oauth manager: %v", err)
 	}
