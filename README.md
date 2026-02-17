@@ -95,7 +95,7 @@ services:
 
 ## Configuration
 
-The server reads `config.yaml` from the current directory by default. Override with `--config` flag or `GYD_CONFIG` environment variable.
+The server reads `config.yaml` from the current directory by default. Override with the `--config` flag.
 
 ⚠️ Service will only read clients from database after first initialization
 
@@ -105,6 +105,11 @@ server:
 
 database:
   path: "gatheryourdeals.db"
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
 
 oauth2:
   access_token_exp: "1h"
@@ -117,6 +122,10 @@ oauth2:
 ```
 
 Server, database, and token expiry settings are read from `config.yaml` on every startup. Changes take effect on restart.
+
+## storage
+
+When running on local, you will have a ``data/`` folder created which stores everything persistent.
 
 ⚠️ **OAuth2 clients are only read from `config.yaml` on first startup** to seed the database. After that, clients are managed exclusively via the admin API. Editing the `clients` section in `config.yaml` after initialization has no effect.
 
@@ -131,8 +140,7 @@ gatheryourdeals admin reset-password    # Reset a user's password
 ### Global flags
 
 ```
---config <path>    Path to config file (default: config.yaml, or GYD_CONFIG env var)
---db <path>        Override database path from config
+--config <path>    Path to config file (default: config.yaml)
 ```
 
 ## API Reference

@@ -1,0 +1,28 @@
+# Runtime data (database + Redis persistence)
+/data/
+
+# Go
+/bin/
+*.exe
+*.test
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# SQLite
+*.db
+*.db-journal
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nginx (not yet needed)
+nginx.conf

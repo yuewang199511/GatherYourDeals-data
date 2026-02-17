@@ -5,15 +5,15 @@ import (
 
 	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/repository"
+	"github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/errors"
 	"github.com/go-oauth2/oauth2/v4/manage"
 	"github.com/go-oauth2/oauth2/v4/server"
-	oauthstore "github.com/go-oauth2/oauth2/v4/store"
 )
 
-// NewOAuthManager creates a go-oauth2 manager with in-memory token storage
+// NewOAuthManager creates a go-oauth2 manager with the given token store
 // and a database-backed client store.
-func NewOAuthManager(cfg *config.Config, clients repository.ClientRepository) (*manage.Manager, error) {
+func NewOAuthManager(cfg *config.Config, clients repository.ClientRepository, tokenStore oauth2.TokenStore) (*manage.Manager, error) {
 	accessExp, err := cfg.OAuth2.GetAccessTokenDuration()
 	if err != nil {
 		return nil, err
@@ -37,13 +37,17 @@ func NewOAuthManager(cfg *config.Config, clients repository.ClientRepository) (*
 		IsGenerateRefresh: true,
 	})
 
-	// In-memory token store. Tokens are lost on server restart.
-	manager.MustTokenStorage(oauthstore.NewMemoryTokenStore())
+	manager.MapTokenStorage(tokenStore)
 
 	// Database-backed client store. Clients persist across restarts.
 	manager.MapClientStorage(NewDBClientStore(clients))
 
 	return manager, nil
+}
+
+// NewRedisTokenStore creates a Redis-backed token store for production use.
+func NewRedisTokenStore(cfg *config.Config) oauth2.TokenStore {
+	return newRedisTokenStore(cfg)
 }
 
 // NewOAuthServer creates a go-oauth2 server configured for the

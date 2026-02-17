@@ -27,10 +27,7 @@ WORKDIR /data
 # Override by mounting your own config.yaml into /data/config.yaml.
 COPY config.yaml /data/config.yaml
 
-ENV GYD_CONFIG=/data/config.yaml
-ENV GYD_DB=/data/gatheryourdeals.db
-
 EXPOSE 8080
 
-ENTRYPOINT ["gatheryourdeals"]
+ENTRYPOINT ["gatheryourdeals", "--config", "/data/config.yaml"]
 CMD ["serve"]

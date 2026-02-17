@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Server   ServerConfig `yaml:"server"`
 	Database DBConfig     `yaml:"database"`
+	Redis    RedisConfig  `yaml:"redis"`
 	OAuth2   OAuth2Config `yaml:"oauth2"`
 }
 
@@ -23,6 +24,13 @@ type ServerConfig struct {
 // DBConfig holds database settings.
 type DBConfig struct {
 	Path string `yaml:"path"`
+}
+
+// RedisConfig holds Redis connection settings for the token store.
+type RedisConfig struct {
+	Addr     string `yaml:"addr"`
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
 }
 
 // OAuth2Config holds OAuth2 settings.
@@ -74,6 +82,9 @@ func (c *Config) validate() error {
 	}
 	if c.Database.Path == "" {
 		c.Database.Path = "gatheryourdeals.db"
+	}
+	if c.Redis.Addr == "" {
+		c.Redis.Addr = "localhost:6379"
 	}
 	if c.OAuth2.AccessTokenExp == "" {
 		c.OAuth2.AccessTokenExp = "1h"

@@ -4,6 +4,11 @@ server:
 database:
   path: "gatheryourdeals.db"
 
+redis:
+  addr: "redis:6379" # assume running with docker compose and Redis is in a service named "redis"
+  password: ""
+  db: 0
+
 oauth2:
   access_token_exp: "1h"
   refresh_token_exp: "168h"

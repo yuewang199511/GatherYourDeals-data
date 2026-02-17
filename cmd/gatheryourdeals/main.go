@@ -17,10 +17,7 @@ import (
 	"golang.org/x/term"
 )
 
-var (
-	dbPath     string
-	configPath string
-)
+var configPath string
 
 func main() {
 	root := &cobra.Command{
@@ -28,12 +25,7 @@ func main() {
 		Short: "GatherYourDeals data service",
 	}
 
-	defaultConfig := os.Getenv("GYD_CONFIG")
-	if defaultConfig == "" {
-		defaultConfig = "config.yaml"
-	}
-	root.PersistentFlags().StringVar(&configPath, "config", defaultConfig, "path to the config file")
-	root.PersistentFlags().StringVar(&dbPath, "db", "", "path to the SQLite database file (overrides config)")
+	root.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to the config file")
 
 	root.AddCommand(serveCmd())
 	root.AddCommand(initCmd())
@@ -55,9 +47,7 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			dbFile := resolveDBPath()
-
-			db, err := sqlite.New(dbFile)
+			db, err := sqlite.New(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
@@ -73,8 +63,9 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("seed clients: %w", err)
 			}
 
-			// Setup OAuth2 with database-backed client store
-			oauthManager, err := auth.NewOAuthManager(cfg, clientRepo)
+			// Setup OAuth2 with Redis-backed token store
+			tokenStore := auth.NewRedisTokenStore(cfg)
+			oauthManager, err := auth.NewOAuthManager(cfg, clientRepo, tokenStore)
 			if err != nil {
 				return fmt.Errorf("setup oauth2: %w", err)
 			}
@@ -131,9 +122,12 @@ func initCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize the database and create the admin account",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dbFile := resolveDBPath()
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
 
-			db, err := sqlite.New(dbFile)
+			db, err := sqlite.New(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
@@ -199,9 +193,12 @@ func resetPasswordCmd() *cobra.Command {
 		Use:   "reset-password",
 		Short: "Reset a user's password",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dbFile := resolveDBPath()
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
 
-			db, err := sqlite.New(dbFile)
+			db, err := sqlite.New(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
@@ -249,23 +246,6 @@ func promptInput(label string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(input), nil
-}
-
-// resolveDBPath returns the database path from the CLI flag if set,
-// otherwise from the GYD_DB env var, otherwise from the config file,
-// otherwise the default.
-func resolveDBPath() string {
-	if dbPath != "" {
-		return dbPath
-	}
-	if envDB := os.Getenv("GYD_DB"); envDB != "" {
-		return envDB
-	}
-	cfg, err := config.Load(configPath)
-	if err == nil && cfg.Database.Path != "" {
-		return cfg.Database.Path
-	}
-	return "gatheryourdeals.db"
 }
 
 func promptPassword(label string) (string, error) {
