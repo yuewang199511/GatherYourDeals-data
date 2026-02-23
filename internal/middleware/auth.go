@@ -4,22 +4,20 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/model"
-	"github.com/gatheryourdeals/data/internal/repository"
 	"github.com/gin-gonic/gin"
-	"github.com/go-oauth2/oauth2/v4/manage"
 )
 
 const (
-	// ContextKeyUserID is the gin context key for the authenticated user's ID.
 	ContextKeyUserID = "userID"
-	// ContextKeyRole is the gin context key for the authenticated user's role.
-	ContextKeyRole = "userRole"
+	ContextKeyRole   = "userRole"
 )
 
-// Auth returns a gin middleware that validates the Bearer token
-// using the go-oauth2 manager, and looks up the user's role from the repository.
-func Auth(manager *manage.Manager, users repository.UserRepository) gin.HandlerFunc {
+// Auth validates the Bearer access token using the TokenService.
+// On success it sets userID and userRole in the gin context.
+// No DB call needed — the role is embedded in the JWT claims.
+func Auth(tokens *auth.TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if header == "" {
@@ -31,31 +29,20 @@ func Auth(manager *manage.Manager, users repository.UserRepository) gin.HandlerF
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
 			return
 		}
-		accessToken := parts[1]
 
-		// Validate the token via go-oauth2 manager.
-		tokenInfo, err := manager.LoadAccessToken(c.Request.Context(), accessToken)
+		claims, err := tokens.ValidateAccessToken(parts[1])
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
 			return
 		}
 
-		userID := tokenInfo.GetUserID()
-
-		// Look up the user's role from the database.
-		user, err := users.GetUserByID(c.Request.Context(), userID)
-		if err != nil || user == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
-			return
-		}
-
-		c.Set(ContextKeyUserID, userID)
-		c.Set(ContextKeyRole, user.Role)
+		c.Set(ContextKeyUserID, claims.UserID)
+		c.Set(ContextKeyRole, claims.Role)
 		c.Next()
 	}
 }
 
-// RequireAdmin returns a gin middleware that rejects non-admin users.
+// RequireAdmin rejects requests from non-admin users.
 // Must be used after the Auth middleware.
 func RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {

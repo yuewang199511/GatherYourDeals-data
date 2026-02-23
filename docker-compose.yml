@@ -1,20 +1,17 @@
 # Docker Compose for local development.
 #
 # The config.yaml from the repo root is baked into the image.
-# The database and Redis data are persisted in ./data/ on the host
+# The database is persisted in ./data/db/ on the host
 # for easy backup and inspection.
 #
 # First-time setup:
-#   1. Run: docker compose run --rm app init
-#   2. Start the server: docker compose up --build
-#
-# NOTE: SQLite supports only one writer at a time. Do not scale the app
-# service to multiple instances. If you need horizontal scaling, replace
-# SQLite with PostgreSQL (see docs/service_structure.md).
-#
-# To use a custom config, mount it over the default:
-#   volumes:
-#     - ./my-config.yaml:/data/config.yaml
+#   1. Copy the example env file and set your JWT secret:
+#        cp .env.example .env
+#        # Edit .env and set GYD_JWT_SECRET to a random string of 32+ characters
+#   2. Initialise the database and create the admin account:
+#        docker compose run --rm app init
+#   3. Start the server:
+#        docker compose up --build
 
 services:
   app:
@@ -23,18 +20,6 @@ services:
       - "8080:8080"
     volumes:
       - ./data/db:/data
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - ./data/redis:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    environment:
+      - GYD_JWT_SECRET=${GYD_JWT_SECRET}
     restart: unless-stopped

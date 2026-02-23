@@ -11,7 +11,6 @@ import (
 	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/handler"
-	"github.com/gatheryourdeals/data/internal/model"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -38,7 +37,7 @@ func main() {
 
 // serveCmd starts the HTTP server.
 func serveCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "serve",
 		Short: "Start the HTTP server",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -47,73 +46,55 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			secret, err := cfg.JWTSecret()
+			if err != nil {
+				return err
+			}
+
 			db, err := sqlite.New(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
 			defer func() { _ = db.Close() }()
 
+			// Repositories
 			userRepo := sqlite.NewUserRepo(db)
-			clientRepo := sqlite.NewClientRepo(db)
+			refreshStore := sqlite.NewRefreshTokenStore(db)
+
+			// Auth service (handles user CRUD + password verification)
 			authService := auth.NewService(userRepo)
 
-			// Seed clients from config if the database has none.
-			ctx := context.Background()
-			if err := seedClients(ctx, clientRepo, cfg); err != nil {
-				return fmt.Errorf("seed clients: %w", err)
-			}
-
-			// Setup OAuth2 with Redis-backed token store
-			tokenStore := auth.NewRedisTokenStore(cfg)
-			oauthManager, err := auth.NewOAuthManager(cfg, clientRepo, tokenStore)
+			// Token service (handles JWT issuance + refresh token lifecycle)
+			accessExp, err := cfg.Auth.GetAccessTokenDuration()
 			if err != nil {
-				return fmt.Errorf("setup oauth2: %w", err)
+				return fmt.Errorf("parse access_token_exp: %w", err)
 			}
-			oauthServer := auth.NewOAuthServer(oauthManager, authService)
+			refreshExp, err := cfg.Auth.GetRefreshTokenDuration()
+			if err != nil {
+				return fmt.Errorf("parse refresh_token_exp: %w", err)
+			}
+			tokenService := auth.NewTokenService(secret, accessExp, refreshExp, refreshStore)
 
+			// Guard: require admin to exist before serving traffic
+			ctx := context.Background()
 			hasAdmin, err := authService.HasAdmin(ctx)
 			if err != nil {
 				return fmt.Errorf("check admin: %w", err)
 			}
 			if !hasAdmin {
-				return fmt.Errorf("no admin account found. Run 'gatheryourdeals init' to create one before starting the server")
+				return fmt.Errorf("no admin account found — run 'gatheryourdeals init' first")
 			}
 
-			authHandler := handler.NewAuthHandler(authService, oauthServer, clientRepo)
-			adminHandler := handler.NewAdminHandler(clientRepo)
-			r := handler.NewRouter(authHandler, adminHandler, oauthManager, userRepo)
+			// Handlers + router
+			authHandler := handler.NewAuthHandler(authService, tokenService)
+			adminHandler := handler.NewAdminHandler(userRepo)
+			r := handler.NewRouter(authHandler, adminHandler, tokenService)
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
 			log.Printf("server starting on %s", addr)
 			return r.Run(addr)
 		},
 	}
-	return cmd
-}
-
-// seedClients inserts clients from config.yaml into the database
-// if no clients exist yet. This handles first-time setup.
-func seedClients(ctx context.Context, clients *sqlite.ClientRepo, cfg *config.Config) error {
-	hasClients, err := clients.HasClients(ctx)
-	if err != nil {
-		return err
-	}
-	if hasClients {
-		return nil
-	}
-
-	for _, c := range cfg.OAuth2.Clients {
-		client := &model.OAuthClient{
-			ID:     c.ID,
-			Secret: c.Secret,
-			Domain: c.Domain,
-		}
-		if err := clients.CreateClient(ctx, client); err != nil {
-			return fmt.Errorf("seed client %q: %w", c.ID, err)
-		}
-		log.Printf("seeded OAuth2 client: %s", c.ID)
-	}
-	return nil
 }
 
 // initCmd creates the database and prompts for admin credentials.
@@ -133,8 +114,7 @@ func initCmd() *cobra.Command {
 			}
 			defer func() { _ = db.Close() }()
 
-			userRepo := sqlite.NewUserRepo(db)
-			svc := auth.NewService(userRepo)
+			svc := auth.NewService(sqlite.NewUserRepo(db))
 
 			ctx := context.Background()
 			exists, err := svc.HasAdmin(ctx)
@@ -150,7 +130,6 @@ func initCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
 			password, err := promptPassword("Admin password: ")
 			if err != nil {
 				return err
@@ -171,7 +150,7 @@ func initCmd() *cobra.Command {
 				return fmt.Errorf("create admin: %w", err)
 			}
 
-			fmt.Printf("Admin account created successfully.\n  ID:       %s\n  Username: %s\n", user.ID, user.Username)
+			fmt.Printf("Admin account created.\n  ID:       %s\n  Username: %s\n", user.ID, user.Username)
 			return nil
 		},
 	}
@@ -187,7 +166,6 @@ func adminCmd() *cobra.Command {
 	return cmd
 }
 
-// resetPasswordCmd resets a user's password interactively.
 func resetPasswordCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset-password",
@@ -204,14 +182,12 @@ func resetPasswordCmd() *cobra.Command {
 			}
 			defer func() { _ = db.Close() }()
 
-			userRepo := sqlite.NewUserRepo(db)
-			svc := auth.NewService(userRepo)
+			svc := auth.NewService(sqlite.NewUserRepo(db))
 
 			username, err := promptInput("Username: ")
 			if err != nil {
 				return err
 			}
-
 			password, err := promptPassword("New password: ")
 			if err != nil {
 				return err
@@ -250,10 +226,10 @@ func promptInput(label string) (string, error) {
 
 func promptPassword(label string) (string, error) {
 	fmt.Print(label)
-	bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	if err != nil {
 		return promptInput(label)
 	}
-	return strings.TrimSpace(string(bytes)), nil
+	return strings.TrimSpace(string(b)), nil
 }

@@ -12,8 +12,7 @@ import (
 type Config struct {
 	Server   ServerConfig `yaml:"server"`
 	Database DBConfig     `yaml:"database"`
-	Redis    RedisConfig  `yaml:"redis"`
-	OAuth2   OAuth2Config `yaml:"oauth2"`
+	Auth     AuthConfig   `yaml:"auth"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -26,25 +25,12 @@ type DBConfig struct {
 	Path string `yaml:"path"`
 }
 
-// RedisConfig holds Redis connection settings for the token store.
-type RedisConfig struct {
-	Addr     string `yaml:"addr"`
-	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`
-}
-
-// OAuth2Config holds OAuth2 settings.
-type OAuth2Config struct {
-	AccessTokenExp  string         `yaml:"access_token_exp"`
-	RefreshTokenExp string         `yaml:"refresh_token_exp"`
-	Clients         []ClientConfig `yaml:"clients"`
-}
-
-// ClientConfig represents a registered OAuth2 client.
-type ClientConfig struct {
-	ID     string `yaml:"id"`
-	Secret string `yaml:"secret"`
-	Domain string `yaml:"domain"`
+// AuthConfig holds JWT authentication settings.
+// The JWT secret is intentionally NOT stored in the YAML file.
+// Set the GYD_JWT_SECRET environment variable instead.
+type AuthConfig struct {
+	AccessTokenExp  string `yaml:"access_token_exp"`
+	RefreshTokenExp string `yaml:"refresh_token_exp"`
 }
 
 // Load reads the config from a YAML file at the given path.
@@ -66,13 +52,23 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// JWTSecret reads the JWT signing secret from the GYD_JWT_SECRET environment variable.
+// Returns an error if it is not set or is too short to be secure.
+func (c *Config) JWTSecret() ([]byte, error) {
+	secret := os.Getenv("GYD_JWT_SECRET")
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("GYD_JWT_SECRET must be set and at least 32 characters long")
+	}
+	return []byte(secret), nil
+}
+
 // GetAccessTokenDuration parses the access token expiry string into a time.Duration.
-func (c *OAuth2Config) GetAccessTokenDuration() (time.Duration, error) {
+func (c *AuthConfig) GetAccessTokenDuration() (time.Duration, error) {
 	return time.ParseDuration(c.AccessTokenExp)
 }
 
 // GetRefreshTokenDuration parses the refresh token expiry string into a time.Duration.
-func (c *OAuth2Config) GetRefreshTokenDuration() (time.Duration, error) {
+func (c *AuthConfig) GetRefreshTokenDuration() (time.Duration, error) {
 	return time.ParseDuration(c.RefreshTokenExp)
 }
 
@@ -83,22 +79,11 @@ func (c *Config) validate() error {
 	if c.Database.Path == "" {
 		c.Database.Path = "gatheryourdeals.db"
 	}
-	if c.Redis.Addr == "" {
-		c.Redis.Addr = "localhost:6379"
+	if c.Auth.AccessTokenExp == "" {
+		c.Auth.AccessTokenExp = "1h"
 	}
-	if c.OAuth2.AccessTokenExp == "" {
-		c.OAuth2.AccessTokenExp = "1h"
-	}
-	if c.OAuth2.RefreshTokenExp == "" {
-		c.OAuth2.RefreshTokenExp = "168h"
-	}
-	if len(c.OAuth2.Clients) == 0 {
-		return fmt.Errorf("at least one OAuth2 client must be configured")
-	}
-	for i, client := range c.OAuth2.Clients {
-		if client.ID == "" {
-			return fmt.Errorf("client at index %d has no ID", i)
-		}
+	if c.Auth.RefreshTokenExp == "" {
+		c.Auth.RefreshTokenExp = "168h"
 	}
 	return nil
 }

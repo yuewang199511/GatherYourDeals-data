@@ -88,6 +88,11 @@ func (s *Service) HasAdmin(ctx context.Context) (bool, error) {
 	return s.users.HasAdmin(ctx)
 }
 
+// GetUserByID returns a user by ID, satisfying the auth.UserLookup interface.
+func (s *Service) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+	return s.users.GetUserByID(ctx, id)
+}
+
 func (s *Service) createUser(ctx context.Context, username, password string, role model.Role) (*model.User, error) {
 	hash, err := HashPassword(password)
 	if err != nil {

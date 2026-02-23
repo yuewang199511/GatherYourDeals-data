@@ -24,11 +24,11 @@ func NewUserRepo(db *DB) *UserRepo {
 
 func (r *UserRepo) CreateUser(ctx context.Context, user *model.User) error {
 	query := `INSERT INTO users (` + userColumns + `) VALUES (?, ?, ?, ?, ?, ?)`
-	now := time.Now().UTC()
+	now := time.Now().Unix()
 	user.CreatedAt = now
 	user.UpdatedAt = now
 	_, err := r.db.conn.ExecContext(ctx, query,
-		user.ID, user.Username, user.PasswordHash, string(user.Role), user.CreatedAt, user.UpdatedAt)
+		user.ID, user.Username, user.PasswordHash, string(user.Role), now, now)
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
@@ -45,7 +45,7 @@ func (r *UserRepo) GetUserByUsername(ctx context.Context, username string) (*mod
 
 func (r *UserRepo) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
 	query := `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
-	_, err := r.db.conn.ExecContext(ctx, query, passwordHash, time.Now().UTC(), id)
+	_, err := r.db.conn.ExecContext(ctx, query, passwordHash, time.Now().Unix(), id)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
@@ -91,7 +91,6 @@ func (r *UserRepo) HasAdmin(ctx context.Context) (bool, error) {
 func (r *UserRepo) scanUser(ctx context.Context, query string, args ...interface{}) (*model.User, error) {
 	row := r.db.conn.QueryRowContext(ctx, query, args...)
 	var u model.User
-	// role is stored as string in the database, need to convert to model.Role
 	var role string
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &role, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {

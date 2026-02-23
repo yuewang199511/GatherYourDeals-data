@@ -7,17 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gatheryourdeals/data/internal/auth"
-	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/handler"
 	"github.com/gatheryourdeals/data/internal/model"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite/testutil"
 	"github.com/gin-gonic/gin"
-	oauth2 "github.com/go-oauth2/oauth2/v4"
-	"github.com/go-oauth2/oauth2/v4/manage"
-	"github.com/go-oauth2/oauth2/v4/store"
 )
 
 func init() {
@@ -27,81 +24,62 @@ func init() {
 type testEnv struct {
 	router      *gin.Engine
 	userRepo    *sqlite.UserRepo
-	clientRepo  *sqlite.ClientRepo
 	authService *auth.Service
-	oauthMgr    *manage.Manager
+	tokens      *auth.TokenService
 }
 
 func setupEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	userRepo := sqlite.NewUserRepo(db)
-	clientRepo := sqlite.NewClientRepo(db)
-	ctx := context.Background()
-
-	// Seed a test client
-	if err := clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "test-client", Secret: "", Domain: ""}); err != nil {
-		t.Fatalf("CreateClient failed: %v", err)
-	}
+	refreshStore := sqlite.NewRefreshTokenStore(db)
 
 	authService := auth.NewService(userRepo)
+	tokens := auth.NewTokenService(
+		[]byte("test-secret-that-is-long-enough-32c"),
+		time.Hour,
+		7*24*time.Hour,
+		refreshStore,
+	)
 
-	cfg := &config.Config{
-		OAuth2: config.OAuth2Config{
-			AccessTokenExp:  "1h",
-			RefreshTokenExp: "168h",
-		},
-	}
-	tokenStore, _ := store.NewMemoryTokenStore()
-	oauthMgr, err := auth.NewOAuthManager(cfg, clientRepo, tokenStore)
-	if err != nil {
-		t.Fatalf("failed to create oauth manager: %v", err)
-	}
-	oauthSrv := auth.NewOAuthServer(oauthMgr, authService)
-
-	authHandler := handler.NewAuthHandler(authService, oauthSrv, clientRepo)
-	adminHandler := handler.NewAdminHandler(clientRepo)
-	r := handler.NewRouter(authHandler, adminHandler, oauthMgr, userRepo)
+	authHandler := handler.NewAuthHandler(authService, tokens)
+	adminHandler := handler.NewAdminHandler(userRepo)
+	r := handler.NewRouter(authHandler, adminHandler, tokens)
 
 	return &testEnv{
 		router:      r,
 		userRepo:    userRepo,
-		clientRepo:  clientRepo,
 		authService: authService,
-		oauthMgr:    oauthMgr,
+		tokens:      tokens,
 	}
 }
 
 // getAdminToken creates an admin user and returns a valid access token.
 func (e *testEnv) getAdminToken(t *testing.T) string {
 	t.Helper()
-	ctx := context.Background()
-	user, err := e.authService.CreateAdmin(ctx, "admin", "adminpass1")
+	user, err := e.authService.CreateAdmin(context.Background(), "admin", "adminpass1")
 	if err != nil {
 		t.Fatalf("failed to create admin: %v", err)
 	}
-	tgr := &oauth2.TokenGenerateRequest{ClientID: "test-client", UserID: user.ID}
-	ti, err := e.oauthMgr.GenerateAccessToken(ctx, oauth2.PasswordCredentials, tgr)
+	access, _, err := e.tokens.IssueTokenPair(context.Background(), user)
 	if err != nil {
-		t.Fatalf("failed to generate admin token: %v", err)
+		t.Fatalf("failed to issue admin token: %v", err)
 	}
-	return ti.GetAccess()
+	return access
 }
 
 // getUserToken creates a regular user and returns a valid access token.
 func (e *testEnv) getUserToken(t *testing.T, username, password string) string {
 	t.Helper()
-	ctx := context.Background()
-	user, err := e.authService.Register(ctx, username, password)
+	user, err := e.authService.Register(context.Background(), username, password)
 	if err != nil {
 		t.Fatalf("failed to register user: %v", err)
 	}
-	tgr := &oauth2.TokenGenerateRequest{ClientID: "test-client", UserID: user.ID}
-	ti, err := e.oauthMgr.GenerateAccessToken(ctx, oauth2.PasswordCredentials, tgr)
+	access, _, err := e.tokens.IssueTokenPair(context.Background(), user)
 	if err != nil {
-		t.Fatalf("failed to generate user token: %v", err)
+		t.Fatalf("failed to issue user token: %v", err)
 	}
-	return ti.GetAccess()
+	return access
 }
 
 func jsonBody(t *testing.T, v interface{}) *bytes.Buffer {
@@ -121,7 +99,6 @@ func TestRegister_Success(t *testing.T) {
 	body := jsonBody(t, map[string]string{
 		"username": "alice",
 		"password": "password123",
-		"clientId": "test-client",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", body)
 	req.Header.Set("Content-Type", "application/json")
@@ -137,49 +114,25 @@ func TestRegister_Success(t *testing.T) {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 	if resp["username"] != "alice" {
-		t.Errorf("expected username 'alice', got '%s'", resp["username"])
+		t.Errorf("expected username 'alice', got '%v'", resp["username"])
 	}
 	if resp["role"] != "user" {
-		t.Errorf("expected role 'user', got '%s'", resp["role"])
-	}
-}
-
-func TestRegister_InvalidClient(t *testing.T) {
-	env := setupEnv(t)
-
-	body := jsonBody(t, map[string]string{
-		"username": "alice",
-		"password": "password123",
-		"clientId": "nonexistent-client",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", body)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	env.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+		t.Errorf("expected role 'user', got '%v'", resp["role"])
 	}
 }
 
 func TestRegister_DuplicateUsername(t *testing.T) {
 	env := setupEnv(t)
 
-	body := jsonBody(t, map[string]string{
-		"username": "alice", "password": "password123", "clientId": "test-client",
-	})
+	body := jsonBody(t, map[string]string{"username": "alice", "password": "password123"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", body)
 	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	env.router.ServeHTTP(w, req)
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
 
-	// Register again with same username
-	body = jsonBody(t, map[string]string{
-		"username": "alice", "password": "password456", "clientId": "test-client",
-	})
+	body = jsonBody(t, map[string]string{"username": "alice", "password": "password456"})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/users", body)
 	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
@@ -190,9 +143,7 @@ func TestRegister_DuplicateUsername(t *testing.T) {
 func TestRegister_PasswordTooShort(t *testing.T) {
 	env := setupEnv(t)
 
-	body := jsonBody(t, map[string]string{
-		"username": "alice", "password": "short", "clientId": "test-client",
-	})
+	body := jsonBody(t, map[string]string{"username": "alice", "password": "short"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -203,14 +154,74 @@ func TestRegister_PasswordTooShort(t *testing.T) {
 	}
 }
 
+// --- Login tests ---
+
+func TestLogin_Success(t *testing.T) {
+	env := setupEnv(t)
+	if _, err := env.authService.Register(context.Background(), "alice", "password123"); err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	body := jsonBody(t, map[string]string{"username": "alice", "password": "password123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp["access_token"] == "" || resp["access_token"] == nil {
+		t.Error("expected non-empty access_token")
+	}
+	if resp["refresh_token"] == "" || resp["refresh_token"] == nil {
+		t.Error("expected non-empty refresh_token")
+	}
+}
+
+func TestLogin_WrongPassword(t *testing.T) {
+	env := setupEnv(t)
+	if _, err := env.authService.Register(context.Background(), "alice", "password123"); err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	body := jsonBody(t, map[string]string{"username": "alice", "password": "wrongpassword"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // --- Logout tests ---
 
 func TestLogout_Success(t *testing.T) {
 	env := setupEnv(t)
-	token := env.getUserToken(t, "alice", "password123")
+	user, err := env.authService.Register(context.Background(), "alice", "password123")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	_, refresh, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
+	access, _, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/oauth/sessions", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	body := jsonBody(t, map[string]string{"refresh_token": refresh})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", body)
+	req.Header.Set("Authorization", "Bearer "+access)
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
 
@@ -222,7 +233,7 @@ func TestLogout_Success(t *testing.T) {
 func TestLogout_NoToken(t *testing.T) {
 	env := setupEnv(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/oauth/sessions", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
 
@@ -231,47 +242,13 @@ func TestLogout_NoToken(t *testing.T) {
 	}
 }
 
-// --- Admin client management tests ---
+// --- Me tests ---
 
-func TestAdminCreateClient(t *testing.T) {
+func TestMe_Success(t *testing.T) {
 	env := setupEnv(t)
-	token := env.getAdminToken(t)
+	token := env.getUserToken(t, "alice", "password123")
 
-	body := jsonBody(t, map[string]string{
-		"id": "new-client", "secret": "s3cret", "domain": "https://example.com",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clients", body)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	env.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAdminCreateClient_Duplicate(t *testing.T) {
-	env := setupEnv(t)
-	token := env.getAdminToken(t)
-
-	body := jsonBody(t, map[string]string{"id": "test-client"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clients", body)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	env.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAdminListClients(t *testing.T) {
-	env := setupEnv(t)
-	token := env.getAdminToken(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clients", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -280,26 +257,208 @@ func TestAdminListClients(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var clients []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &clients); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
-	if len(clients) < 1 {
-		t.Fatal("expected at least 1 client")
+	if resp["role"] != string(model.RoleUser) {
+		t.Errorf("expected role 'user', got '%v'", resp["role"])
 	}
 }
 
-func TestAdminDeleteClient(t *testing.T) {
+// --- Refresh tests ---
+
+func TestRefresh_Success(t *testing.T) {
+	env := setupEnv(t)
+	user, err := env.authService.Register(context.Background(), "alice", "password123")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	_, refresh, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
+
+	body := jsonBody(t, map[string]string{"refresh_token": refresh})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp["access_token"] == nil || resp["access_token"] == "" {
+		t.Error("expected non-empty access_token")
+	}
+	newRefresh, _ := resp["refresh_token"].(string)
+	if newRefresh == "" {
+		t.Error("expected non-empty refresh_token")
+	}
+	if newRefresh == refresh {
+		t.Error("expected rotated refresh token, got same value")
+	}
+}
+
+func TestRefresh_InvalidToken(t *testing.T) {
+	env := setupEnv(t)
+
+	body := jsonBody(t, map[string]string{"refresh_token": "not-a-real-token"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRefresh_ConsumedToken(t *testing.T) {
+	env := setupEnv(t)
+	user, err := env.authService.Register(context.Background(), "alice", "password123")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	_, refresh, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
+
+	// Use the refresh token once
+	body := jsonBody(t, map[string]string{"refresh_token": refresh})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Using it again should fail
+	body = jsonBody(t, map[string]string{"refresh_token": refresh})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on reuse of consumed token, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- Me tests (additional) ---
+
+func TestMe_NoToken(t *testing.T) {
+	env := setupEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+// --- Login tests (additional) ---
+
+func TestLogin_MissingFields(t *testing.T) {
+	env := setupEnv(t)
+
+	body := jsonBody(t, map[string]string{"username": "alice"}) // missing password
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLogin_UnknownUser(t *testing.T) {
+	env := setupEnv(t)
+
+	body := jsonBody(t, map[string]string{"username": "ghost", "password": "password123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- Logout tests (additional) ---
+
+func TestLogout_RefreshTokenRevokedAfterLogout(t *testing.T) {
+	env := setupEnv(t)
+	user, err := env.authService.Register(context.Background(), "alice", "password123")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	access, refresh, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
+
+	// Logout
+	body := jsonBody(t, map[string]string{"refresh_token": refresh})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", body)
+	req.Header.Set("Authorization", "Bearer "+access)
+	req.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Try to use the refresh token — should now be rejected
+	body = jsonBody(t, map[string]string{"refresh_token": refresh})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after logout, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- Admin user management tests ---
+
+func TestAdminListUsers(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+	env.getUserToken(t, "alice", "password123") // create a regular user too
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var users []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if len(users) < 2 {
+		t.Errorf("expected at least 2 users, got %d", len(users))
+	}
+}
+
+func TestAdminDeleteUser(t *testing.T) {
 	env := setupEnv(t)
 	token := env.getAdminToken(t)
 
-	// Create a client to delete
-	ctx := context.Background()
-	if err := env.clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "to-delete", Secret: "", Domain: ""}); err != nil {
-		t.Fatalf("CreateClient failed: %v", err)
+	user, err := env.authService.Register(context.Background(), "todelete", "password123")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/clients/to-delete", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+user.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -309,11 +468,11 @@ func TestAdminDeleteClient(t *testing.T) {
 	}
 }
 
-func TestAdminDeleteClient_NotFound(t *testing.T) {
+func TestAdminDeleteUser_NotFound(t *testing.T) {
 	env := setupEnv(t)
 	token := env.getAdminToken(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/clients/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/nonexistent-id", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -323,25 +482,52 @@ func TestAdminDeleteClient_NotFound(t *testing.T) {
 	}
 }
 
+func TestAdminDeleteUser_RevokesRefreshTokens(t *testing.T) {
+	env := setupEnv(t)
+	adminToken := env.getAdminToken(t)
+
+	user, err := env.authService.Register(context.Background(), "alice", "password123")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	_, refresh, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
+
+	// Delete the user
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+user.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// The deleted user's refresh token should no longer work
+	body := jsonBody(t, map[string]string{"refresh_token": refresh})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after user deletion, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestAdminEndpoints_ForbiddenForRegularUser(t *testing.T) {
 	env := setupEnv(t)
-	// Need an admin to exist first (HasAdmin check), then create a regular user
-	env.getAdminToken(t) // creates admin as side effect
+	env.getAdminToken(t) // ensure admin exists
 	userToken := env.getUserToken(t, "alice", "password123")
 
 	endpoints := []struct {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/api/v1/admin/clients"},
-		{http.MethodPost, "/api/v1/admin/clients"},
-		{http.MethodDelete, "/api/v1/admin/clients/test-client"},
+		{http.MethodGet, "/api/v1/admin/users"},
+		{http.MethodDelete, "/api/v1/admin/users/some-id"},
 	}
 
 	for _, ep := range endpoints {
 		req := httptest.NewRequest(ep.method, ep.path, nil)
 		req.Header.Set("Authorization", "Bearer "+userToken)
-		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		env.router.ServeHTTP(w, req)
 

@@ -4,18 +4,10 @@ server:
 database:
   path: "gatheryourdeals.db"
 
-redis:
-  addr: "redis:6379" # assume running with docker compose and Redis is in a service named "redis"
-  password: ""
-  db: 0
-
-oauth2:
+auth:
   access_token_exp: "1h"
   refresh_token_exp: "168h"
 
-  # WARNING: Clients are only read from this file on first startup to seed the database.
-  # After that, manage clients via the admin API. Changes here have no effect after initialization.
-  clients:
-    - id: "gatheryourdeals"
-      secret: ""
-      domain: "http://localhost"
+# JWT secret is NOT stored here. Set the environment variable:
+#   export GYD_JWT_SECRET="your-secret-at-least-32-chars-long"
+# For Docker, add it to your .env file or docker-compose.yml environment section.
