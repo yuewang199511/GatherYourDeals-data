@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/gatheryourdeals/data/internal/model"
@@ -104,9 +105,11 @@ func (r *ReceiptRepo) validateExtras(ctx context.Context, extras map[string]inte
 			return fmt.Errorf("validate extras: %w", err)
 		}
 		if field == nil {
+			slog.Warn("receipt rejected: unregistered field in extras", "field", key)
 			return fmt.Errorf("%w: %q", model.ErrFieldNotRegistered, key)
 		}
 		if field.Native {
+			slog.Warn("receipt rejected: native field used in extras", "field", key)
 			return fmt.Errorf("%w: %q is a native field and cannot be used in extras", model.ErrFieldNotRegistered, key)
 		}
 	}

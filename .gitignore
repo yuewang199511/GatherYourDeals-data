@@ -1,6 +1,9 @@
 # Runtime data (database + Redis persistence)
 /data/
 
+# Log files
+/logs/
+
 # Go
 /bin/
 *.exe

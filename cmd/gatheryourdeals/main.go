@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/handler"
+	"github.com/gatheryourdeals/data/internal/logger"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -45,6 +46,19 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
+
+			// Logging
+			appLogger, err := logger.New(logger.Config{
+				Dir:      cfg.Log.Dir,
+				Prefix:   "gatheryourdeals",
+				MaxBytes: int64(cfg.Log.MaxSizeMB) * 1024 * 1024,
+				MaxFiles: 2,
+			})
+			if err != nil {
+				return fmt.Errorf("init logger: %w", err)
+			}
+			defer func() { _ = appLogger.Close() }()
+			slog.SetDefault(appLogger.Logger)
 
 			secret, err := cfg.JWTSecret()
 			if err != nil {
@@ -92,10 +106,10 @@ func serveCmd() *cobra.Command {
 			userHandler := handler.NewUserHandler(userRepo)
 			metaHandler := handler.NewMetaHandler(metaRepo)
 			receiptHandler := handler.NewReceiptHandler(receiptRepo)
-			r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService)
+			r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService, appLogger.Writer())
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
-			log.Printf("server starting on %s", addr)
+			slog.Info("server starting", "addr", addr)
 			return r.Run(addr)
 		},
 	}

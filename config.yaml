@@ -8,6 +8,10 @@ auth:
   access_token_exp: "1h"
   refresh_token_exp: "168h"
 
+log:
+  dir: "logs"
+  max_size_mb: 10
+
 # JWT secret is NOT stored here. Set the environment variable:
 #   export GYD_JWT_SECRET="your-secret-at-least-32-chars-long"
 # For Docker, add it to your .env file or docker-compose.yml environment section.

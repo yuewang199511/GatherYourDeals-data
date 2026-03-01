@@ -13,6 +13,7 @@ type Config struct {
 	Server   ServerConfig `yaml:"server"`
 	Database DBConfig     `yaml:"database"`
 	Auth     AuthConfig   `yaml:"auth"`
+	Log      LogConfig    `yaml:"log"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -23,6 +24,12 @@ type ServerConfig struct {
 // DBConfig holds database settings.
 type DBConfig struct {
 	Path string `yaml:"path"`
+}
+
+// LogConfig holds logging settings.
+type LogConfig struct {
+	Dir      string `yaml:"dir"`
+	MaxSizeMB int    `yaml:"max_size_mb"`
 }
 
 // AuthConfig holds JWT authentication settings.
@@ -84,6 +91,12 @@ func (c *Config) validate() error {
 	}
 	if c.Auth.RefreshTokenExp == "" {
 		c.Auth.RefreshTokenExp = "168h"
+	}
+	if c.Log.Dir == "" {
+		c.Log.Dir = "logs"
+	}
+	if c.Log.MaxSizeMB <= 0 {
+		c.Log.MaxSizeMB = 10
 	}
 	return nil
 }
