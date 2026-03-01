@@ -22,11 +22,6 @@ COPY --from=builder /app/gatheryourdeals /usr/local/bin/gatheryourdeals
 RUN mkdir -p /data
 WORKDIR /data
 
-# Copy the single config file from the repo root.
-# Mount /data to persist the database, but the config comes from the image.
-# Override by mounting your own config.yaml into /data/config.yaml.
-COPY config.yaml /data/config.yaml
-
 EXPOSE 8080
 
 ENTRYPOINT ["gatheryourdeals", "--config", "/data/config.yaml"]
