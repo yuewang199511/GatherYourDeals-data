@@ -6,27 +6,7 @@ import (
 	"github.com/gatheryourdeals/data/internal/model"
 )
 
-// ClientRepository defines the storage operations for OAuth2 clients.
-// Implementations can use SQLite, PostgreSQL, or any other backend.
-type ClientRepository interface {
-	// CreateClient inserts a new OAuth2 client.
-	CreateClient(ctx context.Context, client *model.OAuthClient) error
-
-	// GetClientByID returns a client by its ID.
-	GetClientByID(ctx context.Context, id string) (*model.OAuthClient, error)
-
-	// ListClients returns all registered clients.
-	ListClients(ctx context.Context) ([]*model.OAuthClient, error)
-
-	// DeleteClient removes a client by its ID.
-	DeleteClient(ctx context.Context, id string) error
-
-	// HasClients returns true if at least one client exists.
-	HasClients(ctx context.Context) (bool, error)
-}
-
 // UserRepository defines the storage operations for user accounts.
-// Implementations can use SQLite, PostgreSQL, or any other backend.
 type UserRepository interface {
 	// CreateUser inserts a new user into the store.
 	CreateUser(ctx context.Context, user *model.User) error

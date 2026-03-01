@@ -5,84 +5,60 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gatheryourdeals/data/internal/auth"
-	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/middleware"
 	"github.com/gatheryourdeals/data/internal/model"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite/testutil"
 	"github.com/gin-gonic/gin"
-	oauth2 "github.com/go-oauth2/oauth2/v4"
-	"github.com/go-oauth2/oauth2/v4/manage"
-	"github.com/go-oauth2/oauth2/v4/store"
 )
 
 func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// setupTestEnv creates a test database, user, client, and OAuth2 manager.
-// Returns the manager, user repo, and a valid access token for the created user.
-func setupTestEnv(t *testing.T, role model.Role) (*manage.Manager, *sqlite.UserRepo, string) {
+func newTokenService(t *testing.T) (*auth.TokenService, *sqlite.UserRepo) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	userRepo := sqlite.NewUserRepo(db)
-	clientRepo := sqlite.NewClientRepo(db)
-	ctx := context.Background()
+	refreshStore := sqlite.NewRefreshTokenStore(db)
+	tokens := auth.NewTokenService(
+		[]byte("test-secret-that-is-long-enough-32c"),
+		time.Hour,
+		7*24*time.Hour,
+		refreshStore,
+	)
+	return tokens, userRepo
+}
 
-	// Create a test client
-	if err := clientRepo.CreateClient(ctx, &model.OAuthClient{ID: "test-client", Secret: "", Domain: ""}); err != nil {
-		t.Fatalf("CreateClient failed: %v", err)
-	}
-
-	// Create a test user
-	authService := auth.NewService(userRepo)
+func issueToken(t *testing.T, tokens *auth.TokenService, userRepo *sqlite.UserRepo, role model.Role) string {
+	t.Helper()
+	svc := auth.NewService(userRepo)
 	var user *model.User
 	var err error
 	if role == model.RoleAdmin {
-		user, err = authService.CreateAdmin(ctx, "testuser", "password123")
+		user, err = svc.CreateAdmin(t.Context(), "testuser", "password123")
 	} else {
-		user, err = authService.Register(ctx, "testuser", "password123")
+		user, err = svc.Register(t.Context(), "testuser", "password123")
 	}
 	if err != nil {
-		t.Fatalf("failed to create test user: %v", err)
+		t.Fatalf("failed to create user: %v", err)
 	}
-
-	// Create OAuth2 manager and get a token
-	cfg := &config.Config{
-		OAuth2: config.OAuth2Config{
-			AccessTokenExp:  "1h",
-			RefreshTokenExp: "168h",
-		},
-	}
-	tokenStore, _ := store.NewMemoryTokenStore()
-	oauthManager, err := auth.NewOAuthManager(cfg, clientRepo, tokenStore)
+	access, _, err := tokens.IssueTokenPair(t.Context(), user)
 	if err != nil {
-		t.Fatalf("failed to create oauth manager: %v", err)
+		t.Fatalf("failed to issue token: %v", err)
 	}
-	oauthServer := auth.NewOAuthServer(oauthManager, authService)
-
-	// Issue a token via the password grant
-	// We simulate this by calling the manager directly
-	tgr := &oauth2.TokenGenerateRequest{
-		ClientID: "test-client",
-		UserID:   user.ID,
-	}
-	_ = oauthServer // ensure server is configured
-	ti, err := oauthManager.GenerateAccessToken(ctx, oauth2.PasswordCredentials, tgr)
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-
-	return oauthManager, userRepo, ti.GetAccess()
+	return access
 }
 
 func TestAuth_ValidToken(t *testing.T) {
-	oauthManager, userRepo, token := setupTestEnv(t, model.RoleUser)
+	tokens, userRepo := newTokenService(t)
+	token := issueToken(t, tokens, userRepo, model.RoleUser)
 
 	r := gin.New()
-	r.GET("/test", middleware.Auth(oauthManager, userRepo), func(c *gin.Context) {
+	r.GET("/test", middleware.Auth(tokens), func(c *gin.Context) {
 		userID, _ := c.Get(middleware.ContextKeyUserID)
 		role, _ := c.Get(middleware.ContextKeyRole)
 		c.JSON(http.StatusOK, gin.H{"userID": userID, "role": role})
@@ -99,10 +75,10 @@ func TestAuth_ValidToken(t *testing.T) {
 }
 
 func TestAuth_MissingHeader(t *testing.T) {
-	oauthManager, userRepo, _ := setupTestEnv(t, model.RoleUser)
+	tokens, _ := newTokenService(t)
 
 	r := gin.New()
-	r.GET("/test", middleware.Auth(oauthManager, userRepo), func(c *gin.Context) {
+	r.GET("/test", middleware.Auth(tokens), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -116,10 +92,10 @@ func TestAuth_MissingHeader(t *testing.T) {
 }
 
 func TestAuth_InvalidToken(t *testing.T) {
-	oauthManager, userRepo, _ := setupTestEnv(t, model.RoleUser)
+	tokens, _ := newTokenService(t)
 
 	r := gin.New()
-	r.GET("/test", middleware.Auth(oauthManager, userRepo), func(c *gin.Context) {
+	r.GET("/test", middleware.Auth(tokens), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -134,10 +110,10 @@ func TestAuth_InvalidToken(t *testing.T) {
 }
 
 func TestAuth_MalformedHeader(t *testing.T) {
-	oauthManager, userRepo, _ := setupTestEnv(t, model.RoleUser)
+	tokens, _ := newTokenService(t)
 
 	r := gin.New()
-	r.GET("/test", middleware.Auth(oauthManager, userRepo), func(c *gin.Context) {
+	r.GET("/test", middleware.Auth(tokens), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -152,10 +128,11 @@ func TestAuth_MalformedHeader(t *testing.T) {
 }
 
 func TestRequireAdmin_AsAdmin(t *testing.T) {
-	oauthManager, userRepo, token := setupTestEnv(t, model.RoleAdmin)
+	tokens, userRepo := newTokenService(t)
+	token := issueToken(t, tokens, userRepo, model.RoleAdmin)
 
 	r := gin.New()
-	r.GET("/test", middleware.Auth(oauthManager, userRepo), middleware.RequireAdmin(), func(c *gin.Context) {
+	r.GET("/test", middleware.Auth(tokens), middleware.RequireAdmin(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -170,10 +147,11 @@ func TestRequireAdmin_AsAdmin(t *testing.T) {
 }
 
 func TestRequireAdmin_AsUser(t *testing.T) {
-	oauthManager, userRepo, token := setupTestEnv(t, model.RoleUser)
+	tokens, userRepo := newTokenService(t)
+	token := issueToken(t, tokens, userRepo, model.RoleUser)
 
 	r := gin.New()
-	r.GET("/test", middleware.Auth(oauthManager, userRepo), middleware.RequireAdmin(), func(c *gin.Context) {
+	r.GET("/test", middleware.Auth(tokens), middleware.RequireAdmin(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -187,9 +165,58 @@ func TestRequireAdmin_AsUser(t *testing.T) {
 	}
 }
 
+func TestAuth_TamperedClaims(t *testing.T) {
+	tokens, userRepo := newTokenService(t)
+	// Issue a regular user token
+	userToken := issueToken(t, tokens, userRepo, model.RoleUser)
+
+	// A different TokenService with a different secret cannot produce a token
+	// that the original service accepts — forging is impossible
+	attackerDB := testutil.NewTestDB(t)
+	attackerRepo := sqlite.NewUserRepo(attackerDB)
+	attackerTokens := auth.NewTokenService(
+		[]byte("attacker-secret-long-enough-here!!"),
+		time.Hour,
+		7*24*time.Hour,
+		sqlite.NewRefreshTokenStore(attackerDB),
+	)
+	attackerSvc := auth.NewService(attackerRepo)
+	attackerUser, err := attackerSvc.Register(context.Background(), "attacker", "password123")
+	if err != nil {
+		t.Fatalf("failed to create attacker user: %v", err)
+	}
+	// Manually set role to admin to simulate a privilege escalation attempt
+	attackerUser.Role = model.RoleAdmin
+	attackerToken, _, err := attackerTokens.IssueTokenPair(context.Background(), attackerUser)
+	if err != nil {
+		t.Fatalf("failed to issue attacker token: %v", err)
+	}
+
+	// The original service should reject the attacker's token
+	_, err = tokens.ValidateAccessToken(attackerToken)
+	if err == nil {
+		t.Fatal("expected rejection of token signed with wrong secret, got nil")
+	}
+
+	// And the middleware should reject it too
+	r := gin.New()
+	r.GET("/test", middleware.Auth(tokens), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	for _, tok := range []string{userToken + "tampered", attackerToken, "eyJhbGciOiJub25lIn0.eyJ1aWQiOiJoYWNrZXIiLCJyb2xlIjoiYWRtaW4ifQ."} {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("token %q: expected 401, got %d", tok[:20], w.Code)
+		}
+	}
+}
+
 func TestRequireAdmin_NoRole(t *testing.T) {
 	r := gin.New()
-	// Skip Auth middleware — go straight to RequireAdmin with no role set
 	r.GET("/test", middleware.RequireAdmin(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})

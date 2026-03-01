@@ -26,3 +26,6 @@ Thumbs.db
 
 # Nginx (not yet needed)
 nginx.conf
+
+# Local environment secrets
+.env

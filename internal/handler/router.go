@@ -1,40 +1,40 @@
 package handler
 
 import (
-	"github.com/gatheryourdeals/data/internal/middleware"
-	"github.com/gatheryourdeals/data/internal/repository"
 	"github.com/gin-gonic/gin"
-	"github.com/go-oauth2/oauth2/v4/manage"
+
+	"github.com/gatheryourdeals/data/internal/auth"
+	"github.com/gatheryourdeals/data/internal/middleware"
 )
 
 // NewRouter creates a gin router with all routes registered.
 func NewRouter(
 	authHandler *AuthHandler,
 	adminHandler *AdminHandler,
-	oauthManager *manage.Manager,
-	users repository.UserRepository,
+	tokens *auth.TokenService,
 ) *gin.Engine {
 	r := gin.Default()
 	v1 := r.Group("/api/v1")
 
 	// Public endpoints
-	v1.POST("/users", authHandler.Register)
-	v1.POST("/oauth/token", authHandler.Token)
+	v1.POST("/users", authHandler.Register)       // register
+	v1.POST("/auth/login", authHandler.Login)     // login → returns token pair
+	v1.POST("/auth/refresh", authHandler.Refresh) // refresh access token
 
-	// Protected endpoints (any authenticated user)
-	v1protected := v1.Group("")
-	v1protected.Use(middleware.Auth(oauthManager, users))
+	// Authenticated endpoints
+	protected := v1.Group("")
+	protected.Use(middleware.Auth(tokens))
 	{
-		v1protected.DELETE("/oauth/sessions", authHandler.Logout)
+		protected.POST("/auth/logout", authHandler.Logout) // logout (revoke refresh token)
+		protected.GET("/auth/me", authHandler.Me)          // whoami
 	}
 
 	// Admin-only endpoints
-	v1admin := v1.Group("/admin")
-	v1admin.Use(middleware.Auth(oauthManager, users), middleware.RequireAdmin())
+	admin := v1.Group("/admin")
+	admin.Use(middleware.Auth(tokens), middleware.RequireAdmin())
 	{
-		v1admin.POST("/clients", adminHandler.CreateClient)
-		v1admin.GET("/clients", adminHandler.ListClients)
-		v1admin.DELETE("/clients/:id", adminHandler.DeleteClient)
+		admin.GET("/users", adminHandler.ListUsers)
+		admin.DELETE("/users/:id", adminHandler.DeleteUser)
 	}
 
 	return r

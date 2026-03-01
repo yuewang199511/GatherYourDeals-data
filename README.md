@@ -1,12 +1,12 @@
 # GatherYourDeals-data
 
-This is the data service for the GatherYourDeals project. It provides a server for storing and querying purchase data, with user authentication via OAuth2.
+This is the data service for the GatherYourDeals project. It provides a server for storing and querying purchase data, with user authentication via JWT.
 
 ## Quick Start (without Docker)
 
 ### Prerequisites
 
-- Go 1.25.5
+- Go 1.25+
 - GCC (required by the SQLite driver)
 
 ### Build
@@ -19,6 +19,7 @@ go build -o gatheryourdeals ./cmd/gatheryourdeals
 ### Initialize
 
 ```bash
+export GYD_JWT_SECRET="your-secret-at-least-32-chars-long"
 ./gatheryourdeals init
 ```
 
@@ -30,7 +31,7 @@ Creates the database and prompts for an admin username and password. The databas
 ./gatheryourdeals serve
 ```
 
-The server starts on the port configured in `config.yaml` (default: 8080). It will refuse to start if no admin account exists.
+The server starts on the port configured in `config.yaml` (default: 8080). It will refuse to start if no admin account exists or if `GYD_JWT_SECRET` is not set.
 
 ### Admin Recovery
 
@@ -51,12 +52,14 @@ This connects directly to the database — the server does not need to be runnin
 ### First-time setup
 
 ```bash
-# Build the image and initialize the database.
-# This prompts for an admin username and password.
+# Copy the example env file and set your JWT secret
+cp .env.example .env
+# Edit .env and set GYD_JWT_SECRET to a random 32+ character string
+# You can generate one with: openssl rand -hex 32
+
+# Initialize the database and create the admin account
 docker compose run --rm app init
 ```
-
-This creates the admin account and database inside a Docker volume (`gyd-data`). You only need to do this once.
 
 ### Run
 
@@ -72,7 +75,7 @@ The server starts on port 8080. The `--build` flag ensures the image is rebuilt 
 docker compose down
 ```
 
-The database persists in the `gyd-data` volume. Next time you run `docker compose up --build`, everything is still there.
+The database persists in `./data/db/` on the host. Next time you run `docker compose up --build`, everything is still there.
 
 ### Admin Recovery (Docker)
 
@@ -80,24 +83,9 @@ The database persists in the `gyd-data` volume. Next time you run `docker compos
 docker compose run --rm app admin reset-password
 ```
 
-### Custom Configuration
-
-The `config.yaml` at the repo root is baked into the Docker image. To override it without rebuilding, mount your own config:
-
-```yaml
-# docker-compose.yml
-services:
-  app:
-    volumes:
-      - gyd-data:/data
-      - ./my-config.yaml:/data/config.yaml
-```
-
 ## Configuration
 
 The server reads `config.yaml` from the current directory by default. Override with the `--config` flag.
-
-⚠️ Service will only read clients from database after first initialization
 
 ```yaml
 server:
@@ -106,28 +94,18 @@ server:
 database:
   path: "gatheryourdeals.db"
 
-redis:
-  addr: "redis:6379"
-  password: ""
-  db: 0
-
-oauth2:
+auth:
   access_token_exp: "1h"
   refresh_token_exp: "168h"
-
-  clients:
-    - id: "gatheryourdeals"
-      secret: ""
-      domain: "http://localhost"
 ```
 
-Server, database, and token expiry settings are read from `config.yaml` on every startup. Changes take effect on restart.
+The JWT signing secret is **not** stored in `config.yaml`. Set it via the environment variable:
 
-## storage
+```bash
+export GYD_JWT_SECRET="your-secret-at-least-32-chars-long"
+```
 
-When running on local, you will have a ``data/`` folder created which stores everything persistent.
-
-⚠️ **OAuth2 clients are only read from `config.yaml` on first startup** to seed the database. After that, clients are managed exclusively via the admin API. Editing the `clients` section in `config.yaml` after initialization has no effect.
+For Docker, set it in your `.env` file (see `.env.example`). The server will refuse to start if the secret is missing or shorter than 32 characters.
 
 ## CLI Commands
 
@@ -145,21 +123,13 @@ gatheryourdeals admin reset-password    # Reset a user's password
 
 ## API Reference
 
-The full API specification is available in OpenAPI format:
+The full API specification is in **[docs/api.yaml](docs/api.yaml)** (OpenAPI 3.0). Load it into any of these tools for an interactive view:
 
-- **[OpenAPI Spec](docs/api.yaml)** — machine-readable, can be loaded into Swagger UI, Postman, or used for client code generation
-- **[API Examples](docs/api_examples.md)** — curl examples for every endpoint
+- **Swagger UI** — paste the URL or file into [editor.swagger.io](https://editor.swagger.io)
+- **Postman** — Import → Link or file
+- **VS Code** — [OpenAPI (Swagger) Editor](https://marketplace.visualstudio.com/items?itemName=42Crunch.vscode-openapi) extension
 
-### Endpoints Overview
-
-| Endpoint | Method | Auth | Description |
-|:---------|:-------|:-----|:------------|
-| `/api/v1/users` | POST | client_id | Create a new user |
-| `/api/v1/oauth/token` | POST | — | Login or refresh token |
-| `/api/v1/oauth/sessions` | DELETE | Bearer | Delete current session |
-| `/api/v1/admin/clients` | POST | Admin | Register an OAuth2 client |
-| `/api/v1/admin/clients` | GET | Admin | List all clients |
-| `/api/v1/admin/clients/:id` | DELETE | Admin | Revoke a client |
+For quick curl examples, see **[docs/api_examples.md](docs/api_examples.md)**.
 
 ## Documentation
 
@@ -173,9 +143,9 @@ The full API specification is available in OpenAPI format:
 
 - **Single binary** — server and admin CLI in one executable
 - **Docker support** — multi-stage build, persistent volume for database
-- **OAuth2 authentication** — standard token flow with access and refresh tokens
-- **Dynamic client management** — add/revoke OAuth2 clients via admin API without restart
+- **JWT authentication** — stateless access tokens, rotating refresh tokens stored in SQLite
+- **Role-based access** — admin and user roles enforced on every request
 - **SQLite with WAL mode** — lightweight, concurrent reads, no setup required
 - **Swappable database** — repository pattern allows switching to PostgreSQL
 - **Embedded migrations** — schema managed by goose, compiled into the binary
-- **YAML configuration** — server port, database path, OAuth2 clients all configurable
+- **YAML configuration** — server port, database path, token expiry all configurable
