@@ -2,6 +2,8 @@
 
 The data service for the GatherYourDeals project. It provides a server for storing and querying purchase data, with user authentication via JWT.
 
+![GatherYourDeals-data](./GatherYourDeals-data.png)
+
 ## Quick Start (without Docker)
 
 **Prerequisites:** Go 1.25+, GCC (required by the SQLite driver)
