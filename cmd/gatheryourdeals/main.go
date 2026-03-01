@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/config"
 	"github.com/gatheryourdeals/data/internal/handler"
+	"github.com/gatheryourdeals/data/internal/logger"
+	"github.com/gatheryourdeals/data/internal/repository"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -35,38 +38,87 @@ func main() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Database abstraction
+// ---------------------------------------------------------------------------
+
+// repos holds all repository implementations created from a single database.
+type repos struct {
+	Users        repository.UserRepository
+	Meta         repository.MetaFieldRepository
+	Receipts     repository.ReceiptRepository
+	RefreshStore *sqlite.RefreshTokenStore // TODO: extract interface when adding postgres
+	closer       io.Closer
+}
+
+// Close closes the underlying database connection.
+func (r *repos) Close() error {
+	return r.closer.Close()
+}
+
+// openDatabase loads the config and opens the configured database,
+// returning all repository implementations ready to use.
+func openDatabase() (*config.Config, *repos, error) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load config: %w", err)
+	}
+
+	// Currently only SQLite is supported. When adding PostgreSQL,
+	// switch on a cfg.Database.Driver field here.
+	db, err := sqlite.New(cfg.Database.Path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open database: %w", err)
+	}
+
+	metaRepo := sqlite.NewMetaFieldRepo(db)
+
+	r := &repos{
+		Users:        sqlite.NewUserRepo(db),
+		Meta:         metaRepo,
+		Receipts:     sqlite.NewReceiptRepo(db, metaRepo),
+		RefreshStore: sqlite.NewRefreshTokenStore(db),
+		closer:       db,
+	}
+	return cfg, r, nil
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
 // serveCmd starts the HTTP server.
 func serveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Start the HTTP server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath)
+			cfg, r, err := openDatabase()
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return err
 			}
+			defer func() { _ = r.Close() }()
 
+			// Logging
+			appLogger, err := logger.New(logger.Config{
+				Dir:      cfg.Log.Dir,
+				Prefix:   "gatheryourdeals",
+				MaxBytes: int64(cfg.Log.MaxSizeMB) * 1024 * 1024,
+				MaxFiles: 2,
+			})
+			if err != nil {
+				return fmt.Errorf("init logger: %w", err)
+			}
+			defer func() { _ = appLogger.Close() }()
+			slog.SetDefault(appLogger.Logger)
+
+			// Auth
 			secret, err := cfg.JWTSecret()
 			if err != nil {
 				return err
 			}
+			authService := auth.NewService(r.Users)
 
-			db, err := sqlite.New(cfg.Database.Path)
-			if err != nil {
-				return fmt.Errorf("open database: %w", err)
-			}
-			defer func() { _ = db.Close() }()
-
-			// Repositories
-			userRepo := sqlite.NewUserRepo(db)
-			refreshStore := sqlite.NewRefreshTokenStore(db)
-			metaRepo := sqlite.NewMetaFieldRepo(db)
-			receiptRepo := sqlite.NewReceiptRepo(db, metaRepo)
-
-			// Auth service (handles user CRUD + password verification)
-			authService := auth.NewService(userRepo)
-
-			// Token service (handles JWT issuance + refresh token lifecycle)
 			accessExp, err := cfg.Auth.GetAccessTokenDuration()
 			if err != nil {
 				return fmt.Errorf("parse access_token_exp: %w", err)
@@ -75,7 +127,7 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("parse refresh_token_exp: %w", err)
 			}
-			tokenService := auth.NewTokenService(secret, accessExp, refreshExp, refreshStore)
+			tokenService := auth.NewTokenService(secret, accessExp, refreshExp, r.RefreshStore)
 
 			// Guard: require admin to exist before serving traffic
 			ctx := context.Background()
@@ -89,14 +141,14 @@ func serveCmd() *cobra.Command {
 
 			// Handlers + router
 			authHandler := handler.NewAuthHandler(authService, tokenService)
-			userHandler := handler.NewUserHandler(userRepo)
-			metaHandler := handler.NewMetaHandler(metaRepo)
-			receiptHandler := handler.NewReceiptHandler(receiptRepo)
-			r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService)
+			userHandler := handler.NewUserHandler(r.Users)
+			metaHandler := handler.NewMetaHandler(r.Meta)
+			receiptHandler := handler.NewReceiptHandler(r.Receipts)
+			router := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService, appLogger.Writer())
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
-			log.Printf("server starting on %s", addr)
-			return r.Run(addr)
+			slog.Info("server starting", "addr", addr)
+			return router.Run(addr)
 		},
 	}
 }
@@ -107,18 +159,13 @@ func initCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize the database and create the admin account",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath)
+			_, r, err := openDatabase()
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return err
 			}
+			defer func() { _ = r.Close() }()
 
-			db, err := sqlite.New(cfg.Database.Path)
-			if err != nil {
-				return fmt.Errorf("open database: %w", err)
-			}
-			defer func() { _ = db.Close() }()
-
-			svc := auth.NewService(sqlite.NewUserRepo(db))
+			svc := auth.NewService(r.Users)
 
 			ctx := context.Background()
 			exists, err := svc.HasAdmin(ctx)
@@ -130,23 +177,9 @@ func initCmd() *cobra.Command {
 				return nil
 			}
 
-			username, err := promptInput("Admin username: ")
+			username, password, err := promptCredentials("Admin username: ", "Admin password: ")
 			if err != nil {
 				return err
-			}
-			password, err := promptPassword("Admin password: ")
-			if err != nil {
-				return err
-			}
-			confirm, err := promptPassword("Confirm password: ")
-			if err != nil {
-				return err
-			}
-			if password != confirm {
-				return fmt.Errorf("passwords do not match")
-			}
-			if len(password) < 8 {
-				return fmt.Errorf("password must be at least 8 characters")
 			}
 
 			user, err := svc.CreateAdmin(ctx, username, password)
@@ -175,36 +208,21 @@ func resetPasswordCmd() *cobra.Command {
 		Use:   "reset-password",
 		Short: "Reset a user's password",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath)
+			_, r, err := openDatabase()
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return err
 			}
+			defer func() { _ = r.Close() }()
 
-			db, err := sqlite.New(cfg.Database.Path)
-			if err != nil {
-				return fmt.Errorf("open database: %w", err)
-			}
-			defer func() { _ = db.Close() }()
-
-			svc := auth.NewService(sqlite.NewUserRepo(db))
+			svc := auth.NewService(r.Users)
 
 			username, err := promptInput("Username: ")
 			if err != nil {
 				return err
 			}
-			password, err := promptPassword("New password: ")
+			password, err := promptPasswordWithConfirm("New password: ")
 			if err != nil {
 				return err
-			}
-			confirm, err := promptPassword("Confirm password: ")
-			if err != nil {
-				return err
-			}
-			if password != confirm {
-				return fmt.Errorf("passwords do not match")
-			}
-			if len(password) < 8 {
-				return fmt.Errorf("password must be at least 8 characters")
 			}
 
 			ctx := context.Background()
@@ -216,6 +234,42 @@ func resetPasswordCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Input helpers
+// ---------------------------------------------------------------------------
+
+// promptCredentials asks for a username and a confirmed password.
+func promptCredentials(usernameLabel, passwordLabel string) (string, string, error) {
+	username, err := promptInput(usernameLabel)
+	if err != nil {
+		return "", "", err
+	}
+	password, err := promptPasswordWithConfirm(passwordLabel)
+	if err != nil {
+		return "", "", err
+	}
+	return username, password, nil
+}
+
+// promptPasswordWithConfirm asks for a password twice and validates it.
+func promptPasswordWithConfirm(label string) (string, error) {
+	password, err := promptPassword(label)
+	if err != nil {
+		return "", err
+	}
+	confirm, err := promptPassword("Confirm password: ")
+	if err != nil {
+		return "", err
+	}
+	if password != confirm {
+		return "", fmt.Errorf("passwords do not match")
+	}
+	if len(password) < 8 {
+		return "", fmt.Errorf("password must be at least 8 characters")
+	}
+	return password, nil
 }
 
 func promptInput(label string) (string, error) {

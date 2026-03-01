@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"io"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/gatheryourdeals/data/internal/auth"
@@ -8,13 +10,20 @@ import (
 )
 
 // NewRouter creates a gin router with all routes registered.
+// The logWriter is used for Gin's own request logging so it goes to
+// the same destination as application logs (stdout + rotating file).
 func NewRouter(
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
 	metaHandler *MetaHandler,
 	receiptHandler *ReceiptHandler,
 	tokens *auth.TokenService,
+	logWriter io.Writer,
 ) *gin.Engine {
+	if logWriter != nil {
+		gin.DefaultWriter = logWriter
+	}
+
 	r := gin.Default()
 	v1 := r.Group("/api/v1")
 

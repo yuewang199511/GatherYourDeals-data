@@ -2,7 +2,7 @@
 #
 # The config.yaml from the repo root is baked into the image.
 # The database is persisted in ./data/db/ on the host
-# for easy backup and inspection.
+# and logs are persisted in ./data/logs/ for easy inspection.
 #
 # First-time setup:
 #   1. Copy the example env file and set your JWT secret:
@@ -20,6 +20,7 @@ services:
       - "8080:8080"
     volumes:
       - ./data/db:/data
+      - ./data/logs:/data/logs
       - ./config.yaml:/data/config.yaml:ro
     environment:
       - GYD_JWT_SECRET=${GYD_JWT_SECRET}
