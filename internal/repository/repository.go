@@ -19,7 +19,6 @@ type MetaFieldRepository interface {
 
 	// UpdateDescription updates the description of an existing field.
 	UpdateDescription(ctx context.Context, fieldName string, description string) error
-
 }
 
 // ReceiptRepository defines the storage operations for purchase records.

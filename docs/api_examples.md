@@ -172,7 +172,7 @@ curl -X POST http://localhost:8080/api/v1/receipts \
     "storeName": "Costco",
     "latitude": 49.2827,
     "longitude": -123.1207,
-    "extras": {"brand": "Kirkland"}
+    "brand": "Kirkland"
   }'
 ```
 
@@ -187,13 +187,13 @@ Response:
   "storeName": "Costco",
   "latitude": 49.2827,
   "longitude": -123.1207,
-  "extras": {"brand": "Kirkland"},
+  "brand": "Kirkland",
   "uploadTime": 1770620311,
   "userId": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
-The server sets `id`, `uploadTime`, and `userId` automatically. Any key in `extras` must be registered in the meta table, or the request is rejected with 400.
+The server sets `id`, `uploadTime`, and `userId` automatically. Native fields become columns; any extra keys are stored as JSON internally but returned flat. Every non-native key must be registered in the meta table, or the request is rejected with 400.
 
 ## 10. List own receipts
 
@@ -214,10 +214,10 @@ Response:
     "storeName": "Costco",
     "latitude": 49.2827,
     "longitude": -123.1207,
-    "extras": {"brand": "Kirkland"},
+    "brand": "Kirkland",
     "uploadTime": 1770620311,
     "userId": "550e8400-e29b-41d4-a716-446655440000"
-  }
+    }
 ]
 ```
 

@@ -22,19 +22,8 @@ func NewReceiptHandler(receipts repository.ReceiptRepository) *ReceiptHandler {
 	return &ReceiptHandler{receipts: receipts}
 }
 
-type createReceiptRequest struct {
-	ProductName  string                 `json:"productName" binding:"required"`
-	PurchaseDate string                 `json:"purchaseDate" binding:"required"`
-	Price        string                 `json:"price" binding:"required"`
-	Amount       string                 `json:"amount" binding:"required"`
-	StoreName    string                 `json:"storeName" binding:"required"`
-	Latitude     *float64               `json:"latitude"`
-	Longitude    *float64               `json:"longitude"`
-	Extras       map[string]interface{} `json:"extras"`
-}
-
 // CreateReceipt handles POST /api/v1/receipts
-// Creates a new purchase record for the authenticated user.
+// Accepts a flat JSON object. Native fields become columns; the rest go into extras.
 func (h *ReceiptHandler) CreateReceipt(c *gin.Context) {
 	userID, exists := c.Get(middleware.ContextKeyUserID)
 	if !exists {
@@ -42,24 +31,24 @@ func (h *ReceiptHandler) CreateReceipt(c *gin.Context) {
 		return
 	}
 
-	var req createReceiptRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var raw map[string]interface{}
+	if err := c.ShouldBindJSON(&raw); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	receipt := &model.Receipt{
-		ID:           uuid.New().String(),
-		ProductName:  req.ProductName,
-		PurchaseDate: req.PurchaseDate,
-		Price:        req.Price,
-		Amount:       req.Amount,
-		StoreName:    req.StoreName,
-		Latitude:     req.Latitude,
-		Longitude:    req.Longitude,
-		Extras:       req.Extras,
-		UserID:       userID.(string),
+	receipt, extras := model.ParseReceiptFromMap(raw)
+
+	// Validate required native fields.
+	if receipt.ProductName == "" || receipt.PurchaseDate == "" ||
+		receipt.Price == "" || receipt.Amount == "" || receipt.StoreName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "productName, purchaseDate, price, amount, and storeName are required"})
+		return
 	}
+
+	receipt.ID = uuid.New().String()
+	receipt.Extras = extras
+	receipt.UserID = userID.(string)
 
 	if err := h.receipts.CreateReceipt(c.Request.Context(), receipt); err != nil {
 		if errors.Is(err, model.ErrFieldNotRegistered) {

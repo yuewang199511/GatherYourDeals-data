@@ -794,14 +794,14 @@ func TestReceipt_Create_WithExtras(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	env.router.ServeHTTP(httptest.NewRecorder(), req)
 
-	// User creates a receipt with the extra field
+	// User creates a receipt with the extra field — flat, no "extras" wrapper
 	body = jsonBody(t, map[string]interface{}{
 		"productName":  "Milk 2%",
 		"purchaseDate": "2025.04.05",
 		"price":        "5.49CAD",
 		"amount":       "1",
 		"storeName":    "Costco",
-		"extras":       map[string]interface{}{"brand": "Kirkland"},
+		"brand":        "Kirkland",
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
 	req.Header.Set("Authorization", "Bearer "+userToken)
@@ -811,6 +811,18 @@ func TestReceipt_Create_WithExtras(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The response should contain "brand" at the top level
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if resp["brand"] != "Kirkland" {
+		t.Errorf("expected brand 'Kirkland' at top level, got %v", resp["brand"])
+	}
+	if _, hasExtras := resp["extras"]; hasExtras {
+		t.Error("expected no 'extras' key in response, but found one")
 	}
 }
 
@@ -824,7 +836,7 @@ func TestReceipt_Create_UnregisteredExtra(t *testing.T) {
 		"price":        "5.49CAD",
 		"amount":       "1",
 		"storeName":    "Costco",
-		"extras":       map[string]interface{}{"unknownField": "value"},
+		"unknownField": "value",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -892,7 +904,9 @@ func TestReceipt_GetByID(t *testing.T) {
 	env.router.ServeHTTP(w, req)
 
 	var created map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &created)
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	id := created["id"].(string)
 
 	// Get it back
@@ -906,7 +920,9 @@ func TestReceipt_GetByID(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	if resp["productName"] != "Milk 2%" {
 		t.Errorf("expected 'Milk 2%%', got %v", resp["productName"])
 	}
@@ -955,7 +971,9 @@ func TestReceipt_List(t *testing.T) {
 	}
 
 	var receipts []map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &receipts)
+	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	if len(receipts) != 2 {
 		t.Errorf("expected 2 receipts, got %d", len(receipts))
 	}
@@ -975,7 +993,9 @@ func TestReceipt_List_Empty(t *testing.T) {
 	}
 
 	var receipts []map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &receipts)
+	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	if len(receipts) != 0 {
 		t.Errorf("expected empty list, got %d", len(receipts))
 	}
@@ -1006,7 +1026,9 @@ func TestReceipt_List_OnlyOwnReceipts(t *testing.T) {
 	env.router.ServeHTTP(w, req)
 
 	var receipts []map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &receipts)
+	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	if len(receipts) != 0 {
 		t.Errorf("expected 0 receipts for bob, got %d", len(receipts))
 	}
@@ -1031,7 +1053,9 @@ func TestReceipt_Delete(t *testing.T) {
 	env.router.ServeHTTP(w, req)
 
 	var created map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &created)
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	id := created["id"].(string)
 
 	// Delete

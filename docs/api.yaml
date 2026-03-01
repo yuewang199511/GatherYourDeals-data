@@ -104,6 +104,11 @@ components:
 
     Receipt:
       type: object
+      description: |
+        A flat JSON object. Native fields (productName, price, etc.) are stored as
+        dedicated columns. Any additional keys are user-defined fields stored as JSON
+        internally but returned at the same level. Every non-native key must be
+        registered in the meta table.
       properties:
         id:
           type: string
@@ -136,11 +141,6 @@ components:
           format: float
           nullable: true
           example: -123.1207
-        extras:
-          type: object
-          additionalProperties: true
-          description: User-defined fields. Every key must be registered in the meta table.
-          example: {"brand": "Kirkland", "organic": true}
         uploadTime:
           type: integer
           description: Upload time as Unix epoch seconds (set by server)
@@ -150,6 +150,20 @@ components:
           format: uuid
           description: ID of the user who created this record (set by server)
           example: "550e8400-e29b-41d4-a716-446655440000"
+      additionalProperties:
+        description: User-defined fields registered in the meta table
+      example:
+        id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        productName: "Milk 2%"
+        purchaseDate: "2025.04.05"
+        price: "5.49CAD"
+        amount: "2lb"
+        storeName: "Costco"
+        latitude: 49.2827
+        longitude: -123.1207
+        brand: "Kirkland"
+        uploadTime: 1770620311
+        userId: "550e8400-e29b-41d4-a716-446655440000"
 
 paths:
   # ── Users ──────────────────────────────────────────────────────────────
@@ -458,6 +472,9 @@ paths:
         - bearerAuth: []
       requestBody:
         required: true
+        description: |
+          A flat JSON object. Include native fields and any registered
+          user-defined fields at the same level — no `extras` wrapper needed.
         content:
           application/json:
             schema:
@@ -487,10 +504,8 @@ paths:
                   type: number
                   format: float
                   example: -123.1207
-                extras:
-                  type: object
-                  additionalProperties: true
-                  example: {"brand": "Kirkland"}
+              additionalProperties:
+                description: User-defined fields registered in the meta table
       responses:
         "201":
           description: Receipt created
