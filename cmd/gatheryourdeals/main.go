@@ -60,6 +60,8 @@ func serveCmd() *cobra.Command {
 			// Repositories
 			userRepo := sqlite.NewUserRepo(db)
 			refreshStore := sqlite.NewRefreshTokenStore(db)
+			metaRepo := sqlite.NewMetaFieldRepo(db)
+			receiptRepo := sqlite.NewReceiptRepo(db, metaRepo)
 
 			// Auth service (handles user CRUD + password verification)
 			authService := auth.NewService(userRepo)
@@ -87,8 +89,10 @@ func serveCmd() *cobra.Command {
 
 			// Handlers + router
 			authHandler := handler.NewAuthHandler(authService, tokenService)
-			adminHandler := handler.NewAdminHandler(userRepo)
-			r := handler.NewRouter(authHandler, adminHandler, tokenService)
+			userHandler := handler.NewUserHandler(userRepo)
+			metaHandler := handler.NewMetaHandler(metaRepo)
+			receiptHandler := handler.NewReceiptHandler(receiptRepo)
+			r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService)
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
 			log.Printf("server starting on %s", addr)

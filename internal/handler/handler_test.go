@@ -24,6 +24,8 @@ func init() {
 type testEnv struct {
 	router      *gin.Engine
 	userRepo    *sqlite.UserRepo
+	metaRepo    *sqlite.MetaFieldRepo
+	receiptRepo *sqlite.ReceiptRepo
 	authService *auth.Service
 	tokens      *auth.TokenService
 }
@@ -33,6 +35,8 @@ func setupEnv(t *testing.T) *testEnv {
 	db := testutil.NewTestDB(t)
 	userRepo := sqlite.NewUserRepo(db)
 	refreshStore := sqlite.NewRefreshTokenStore(db)
+	metaRepo := sqlite.NewMetaFieldRepo(db)
+	receiptRepo := sqlite.NewReceiptRepo(db, metaRepo)
 
 	authService := auth.NewService(userRepo)
 	tokens := auth.NewTokenService(
@@ -43,12 +47,16 @@ func setupEnv(t *testing.T) *testEnv {
 	)
 
 	authHandler := handler.NewAuthHandler(authService, tokens)
-	adminHandler := handler.NewAdminHandler(userRepo)
-	r := handler.NewRouter(authHandler, adminHandler, tokens)
+	userHandler := handler.NewUserHandler(userRepo)
+	metaHandler := handler.NewMetaHandler(metaRepo)
+	receiptHandler := handler.NewReceiptHandler(receiptRepo)
+	r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokens)
 
 	return &testEnv{
 		router:      r,
 		userRepo:    userRepo,
+		metaRepo:    metaRepo,
+		receiptRepo: receiptRepo,
 		authService: authService,
 		tokens:      tokens,
 	}
@@ -431,7 +439,7 @@ func TestAdminListUsers(t *testing.T) {
 	token := env.getAdminToken(t)
 	env.getUserToken(t, "alice", "password123") // create a regular user too
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -458,7 +466,7 @@ func TestAdminDeleteUser(t *testing.T) {
 		t.Fatalf("Register failed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+user.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+user.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -472,7 +480,7 @@ func TestAdminDeleteUser_NotFound(t *testing.T) {
 	env := setupEnv(t)
 	token := env.getAdminToken(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/nonexistent-id", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/nonexistent-id", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -496,7 +504,7 @@ func TestAdminDeleteUser_RevokesRefreshTokens(t *testing.T) {
 	}
 
 	// Delete the user
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+user.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+user.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	env.router.ServeHTTP(httptest.NewRecorder(), req)
 
@@ -521,8 +529,8 @@ func TestAdminEndpoints_ForbiddenForRegularUser(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/api/v1/admin/users"},
-		{http.MethodDelete, "/api/v1/admin/users/some-id"},
+		{http.MethodGet, "/api/v1/users"},
+		{http.MethodDelete, "/api/v1/users/some-id"},
 	}
 
 	for _, ep := range endpoints {
@@ -534,5 +542,553 @@ func TestAdminEndpoints_ForbiddenForRegularUser(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%s %s: expected 403, got %d", ep.method, ep.path, w.Code)
 		}
+	}
+}
+
+// ===========================================================================
+// Meta field handler tests
+// ===========================================================================
+
+func TestMeta_ListFields(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var fields []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(fields) != 7 {
+		t.Errorf("expected 7 native fields, got %d", len(fields))
+	}
+}
+
+func TestMeta_ListFields_Unauthenticated(t *testing.T) {
+	env := setupEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/meta", nil)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestMeta_CreateField(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]string{
+		"fieldName":   "brand",
+		"description": "brand of the product",
+		"type":        "string",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if resp["fieldName"] != "brand" {
+		t.Errorf("expected fieldName 'brand', got %v", resp["fieldName"])
+	}
+}
+
+func TestMeta_CreateField_Duplicate(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]string{
+		"fieldName":   "brand",
+		"description": "brand of the product",
+		"type":        "string",
+	})
+
+	// First create
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Duplicate
+	body = jsonBody(t, map[string]string{
+		"fieldName":   "brand",
+		"description": "duplicate",
+		"type":        "string",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMeta_CreateField_MissingFields(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]string{"fieldName": "brand"}) // missing description and type
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMeta_CreateField_Unauthenticated(t *testing.T) {
+	env := setupEnv(t)
+
+	body := jsonBody(t, map[string]string{
+		"fieldName":   "brand",
+		"description": "brand of the product",
+		"type":        "string",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMeta_UpdateDescription(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+
+	// Create a field first (any authenticated user can do this)
+	body := jsonBody(t, map[string]string{
+		"fieldName":   "brand",
+		"description": "original",
+		"type":        "string",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Update
+	body = jsonBody(t, map[string]string{"description": "updated description"})
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/meta/brand", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMeta_UpdateDescription_NotFound(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+
+	body := jsonBody(t, map[string]string{"description": "nope"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/meta/nonexistent", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMeta_UpdateDescription_ForbiddenForRegularUser(t *testing.T) {
+	env := setupEnv(t)
+	env.getAdminToken(t)
+	userToken := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]string{"description": "nope"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/meta/productName", body)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ===========================================================================
+// Receipt handler tests
+// ===========================================================================
+
+func TestReceipt_Create(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  "Milk 2%",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if resp["productName"] != "Milk 2%" {
+		t.Errorf("expected productName 'Milk 2%%', got %v", resp["productName"])
+	}
+	if resp["userId"] == nil || resp["userId"] == "" {
+		t.Error("expected userId to be set")
+	}
+	if resp["uploadTime"] == nil || resp["uploadTime"].(float64) == 0 {
+		t.Error("expected uploadTime to be set")
+	}
+}
+
+func TestReceipt_Create_WithExtras(t *testing.T) {
+	env := setupEnv(t)
+	userToken := env.getUserToken(t, "alice", "password123")
+
+	// User registers the custom field
+	body := jsonBody(t, map[string]string{
+		"fieldName":   "brand",
+		"description": "brand of the product",
+		"type":        "string",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	req.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// User creates a receipt with the extra field — flat, no "extras" wrapper
+	body = jsonBody(t, map[string]interface{}{
+		"productName":  "Milk 2%",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+		"brand":        "Kirkland",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The response should contain "brand" at the top level
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if resp["brand"] != "Kirkland" {
+		t.Errorf("expected brand 'Kirkland' at top level, got %v", resp["brand"])
+	}
+	if _, hasExtras := resp["extras"]; hasExtras {
+		t.Error("expected no 'extras' key in response, but found one")
+	}
+}
+
+func TestReceipt_Create_UnregisteredExtra(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  "Milk 2%",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+		"unknownField": "value",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_Create_MissingFields(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	body := jsonBody(t, map[string]string{"productName": "Milk"}) // missing required fields
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_Create_Unauthenticated(t *testing.T) {
+	env := setupEnv(t)
+
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  "Milk",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestReceipt_GetByID(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	// Create a receipt
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  "Milk 2%",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	var created map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	id := created["id"].(string)
+
+	// Get it back
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/receipts/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if resp["productName"] != "Milk 2%" {
+		t.Errorf("expected 'Milk 2%%', got %v", resp["productName"])
+	}
+}
+
+func TestReceipt_GetByID_NotFound(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_List(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	// Create two receipts
+	for _, name := range []string{"Milk", "Bread"} {
+		body := jsonBody(t, map[string]interface{}{
+			"productName":  name,
+			"purchaseDate": "2025.04.05",
+			"price":        "3.00CAD",
+			"amount":       "1",
+			"storeName":    "Costco",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		env.router.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var receipts []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(receipts) != 2 {
+		t.Errorf("expected 2 receipts, got %d", len(receipts))
+	}
+}
+
+func TestReceipt_List_Empty(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var receipts []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(receipts) != 0 {
+		t.Errorf("expected empty list, got %d", len(receipts))
+	}
+}
+
+func TestReceipt_List_OnlyOwnReceipts(t *testing.T) {
+	env := setupEnv(t)
+	aliceToken := env.getUserToken(t, "alice", "password123")
+	bobToken := env.getUserToken(t, "bob", "password123")
+
+	// Alice creates a receipt
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  "Milk",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+aliceToken)
+	req.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Bob should see an empty list
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/receipts", nil)
+	req.Header.Set("Authorization", "Bearer "+bobToken)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	var receipts []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(receipts) != 0 {
+		t.Errorf("expected 0 receipts for bob, got %d", len(receipts))
+	}
+}
+
+func TestReceipt_Delete(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	// Create
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  "Milk",
+		"purchaseDate": "2025.04.05",
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	var created map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	id := created["id"].(string)
+
+	// Delete
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/receipts/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify it's gone
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/receipts/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 after delete, got %d", w.Code)
+	}
+}
+
+func TestReceipt_Delete_NotFound(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/receipts/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }

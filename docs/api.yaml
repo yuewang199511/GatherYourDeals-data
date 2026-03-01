@@ -14,7 +14,7 @@ info:
     4. When the access token expires, call `POST /auth/refresh` with the refresh token to get a new pair
     5. Log out via `POST /auth/logout` — revokes the refresh token
 
-  version: 0.2.0
+  version: 0.3.0
   license:
     name: MIT
 
@@ -27,8 +27,14 @@ tags:
     description: User registration
   - name: Sessions
     description: Login, logout, token refresh, and current user info
+  - name: Meta
+    description: Field metadata — list all registered fields
+  - name: Receipts
+    description: Purchase records — create, list, get, and delete
   - name: Admin - Users
     description: User management (admin only)
+  - name: Admin - Meta
+    description: Field metadata management (admin only)
 
 components:
   securitySchemes:
@@ -79,7 +85,89 @@ components:
             token in the Authorization header as: Authorization: Bearer <access_token>
           example: "Bearer"
 
+    MetaField:
+      type: object
+      properties:
+        fieldName:
+          type: string
+          example: "brand"
+        description:
+          type: string
+          example: "brand of the product"
+        type:
+          type: string
+          example: "string"
+        native:
+          type: boolean
+          description: Whether this is a built-in field that cannot be removed
+          example: false
+
+    Receipt:
+      type: object
+      description: |
+        A flat JSON object. Native fields (productName, price, etc.) are stored as
+        dedicated columns. Any additional keys are user-defined fields stored as JSON
+        internally but returned at the same level. Every non-native key must be
+        registered in the meta table.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        productName:
+          type: string
+          example: "Milk 2%"
+        purchaseDate:
+          type: string
+          description: Purchase date in Y.M.D format
+          example: "2025.04.05"
+        price:
+          type: string
+          example: "5.49CAD"
+        amount:
+          type: string
+          description: Amount in the format of number or number(unit)
+          example: "2lb"
+        storeName:
+          type: string
+          example: "Costco"
+        latitude:
+          type: number
+          format: float
+          nullable: true
+          example: 49.2827
+        longitude:
+          type: number
+          format: float
+          nullable: true
+          example: -123.1207
+        uploadTime:
+          type: integer
+          description: Upload time as Unix epoch seconds (set by server)
+          example: 1770620311
+        userId:
+          type: string
+          format: uuid
+          description: ID of the user who created this record (set by server)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      additionalProperties:
+        description: User-defined fields registered in the meta table
+      example:
+        id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        productName: "Milk 2%"
+        purchaseDate: "2025.04.05"
+        price: "5.49CAD"
+        amount: "2lb"
+        storeName: "Costco"
+        latitude: 49.2827
+        longitude: -123.1207
+        brand: "Kirkland"
+        uploadTime: 1770620311
+        userId: "550e8400-e29b-41d4-a716-446655440000"
+
 paths:
+  # ── Users ──────────────────────────────────────────────────────────────
+
   /users:
     post:
       summary: Register a new user
@@ -120,6 +208,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+    get:
+      summary: List all users
+      description: Returns all registered user accounts. Admin only (role checked inside handler).
+      tags: [Admin - Users]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Sessions ───────────────────────────────────────────────────────────
 
   /auth/login:
     post:
@@ -262,36 +380,248 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /admin/users:
+  # ── Meta (authenticated) ───────────────────────────────────────────────
+
+  /meta:
     get:
-      summary: List all users
-      description: Returns all registered user accounts. Admin only.
-      tags: [Admin - Users]
+      summary: List all fields
+      description: |
+        Returns all registered field definitions, both native (built-in) and user-defined.
+        Any authenticated user can call this endpoint.
+      tags: [Meta]
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: List of users
+          description: List of fields
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/User"
+                  $ref: "#/components/schemas/MetaField"
         "401":
           description: Missing or invalid token
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "403":
-          description: Admin access required
+
+    post:
+      summary: Register a new field
+      description: |
+        Registers a new user-defined field. Once registered, receipts can include
+        this field in their `extras` object. Any authenticated user can register fields.
+      tags: [Meta]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fieldName, description, type]
+              properties:
+                fieldName:
+                  type: string
+                  example: "brand"
+                description:
+                  type: string
+                  example: "brand of the product"
+                type:
+                  type: string
+                  example: "string"
+      responses:
+        "201":
+          description: Field registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaField"
+        "400":
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Field already exists
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /admin/users/{id}:
+  # ── Receipts (authenticated) ───────────────────────────────────────────
+
+  /receipts:
+    post:
+      summary: Create a receipt
+      description: |
+        Creates a new purchase record for the authenticated user.
+        The server sets `id`, `uploadTime`, and `userId` automatically.
+        Any keys in `extras` must be registered in the meta table or the request is rejected.
+      tags: [Receipts]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        description: |
+          A flat JSON object. Include native fields and any registered
+          user-defined fields at the same level — no `extras` wrapper needed.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productName, purchaseDate, price, amount, storeName]
+              properties:
+                productName:
+                  type: string
+                  example: "Milk 2%"
+                purchaseDate:
+                  type: string
+                  example: "2025.04.05"
+                price:
+                  type: string
+                  example: "5.49CAD"
+                amount:
+                  type: string
+                  example: "1"
+                storeName:
+                  type: string
+                  example: "Costco"
+                latitude:
+                  type: number
+                  format: float
+                  example: 49.2827
+                longitude:
+                  type: number
+                  format: float
+                  example: -123.1207
+              additionalProperties:
+                description: User-defined fields registered in the meta table
+      responses:
+        "201":
+          description: Receipt created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        "400":
+          description: Missing required fields or unregistered extra field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      summary: List own receipts
+      description: Returns all receipts belonging to the authenticated user, newest first.
+      tags: [Receipts]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of receipts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Receipt"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /receipts/{id}:
+    get:
+      summary: Get a receipt by ID
+      description: Returns a single receipt by its ID.
+      tags: [Receipts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        "200":
+          description: Receipt found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Receipt not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      summary: Delete a receipt
+      description: Deletes a receipt by its ID.
+      tags: [Receipts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        "200":
+          description: Receipt deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "receipt deleted"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Receipt not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Users (admin only) ─────────────────────────────────────────────────
+
+  /users/{id}:
     delete:
       summary: Delete a user
       description: |
@@ -333,6 +663,70 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Admin — Meta ───────────────────────────────────────────────────────
+
+  /meta/{fieldName}:
+    put:
+      summary: Update a field description
+      description: |
+        Updates the description of an existing field (native or user-defined). Admin only.
+      tags: [Admin - Meta]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: fieldName
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "brand"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description:
+                  type: string
+                  example: "brand or manufacturer of the product"
+      responses:
+        "200":
+          description: Description updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "description updated"
+        "400":
+          description: Missing description
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Field not found
           content:
             application/json:
               schema:
