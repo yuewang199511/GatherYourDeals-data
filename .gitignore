@@ -29,3 +29,6 @@ nginx.conf
 
 # Local environment secrets
 .env
+
+# build
+gatheryourdeals

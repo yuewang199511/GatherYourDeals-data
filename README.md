@@ -19,6 +19,9 @@ go build -o gatheryourdeals ./cmd/gatheryourdeals
 ### Initialize
 
 ```bash
+# Generate a random secret and paste it into .env
+openssl rand -hex 32
+# Edit .env and set GYD_JWT_SECRET to the generated value
 export GYD_JWT_SECRET="your-secret-at-least-32-chars-long"
 ./gatheryourdeals init
 ```
@@ -54,12 +57,23 @@ This connects directly to the database — the server does not need to be runnin
 ```bash
 # Copy the example env file and set your JWT secret
 cp .env.example .env
-# Edit .env and set GYD_JWT_SECRET to a random 32+ character string
-# You can generate one with: openssl rand -hex 32
+
+# Generate a random secret and paste it into .env
+openssl rand -hex 32
+# Edit .env and set GYD_JWT_SECRET to the generated value
 
 # Initialize the database and create the admin account
 docker compose run --rm app init
 ```
+
+> **Note:** Docker Compose treats dollar signs in `.env` values as
+> variable interpolation. If your secret contains dollar-sign characters
+> (e.g. from `openssl rand -base64`), you will see warnings like
+> *"The "mP" variable is not set"* and the secret will be silently
+> corrupted. Use `openssl rand -hex 32` instead — hex output only
+> contains `0-9` and `a-f`, so it avoids this issue entirely.
+> If you must use a secret that contains a dollar sign, escape each one
+> by doubling it (e.g. `$$`).
 
 ### Run
 
