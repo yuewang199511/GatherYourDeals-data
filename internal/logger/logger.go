@@ -28,7 +28,7 @@ func DefaultConfig() Config {
 // interfaces so Gin and application code share the same output.
 type Logger struct {
 	*slog.Logger
-	writer  io.Writer        // multi-writer (stdout + file)
+	writer  io.Writer // multi-writer (stdout + file)
 	rotator *RotatingWriter
 }
 

@@ -28,7 +28,7 @@ type DBConfig struct {
 
 // LogConfig holds logging settings.
 type LogConfig struct {
-	Dir      string `yaml:"dir"`
+	Dir       string `yaml:"dir"`
 	MaxSizeMB int    `yaml:"max_size_mb"`
 }
 
