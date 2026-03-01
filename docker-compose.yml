@@ -20,6 +20,7 @@ services:
       - "8080:8080"
     volumes:
       - ./data/db:/data
+      - ./config.yaml:/data/config.yaml:ro
     environment:
       - GYD_JWT_SECRET=${GYD_JWT_SECRET}
     restart: unless-stopped
