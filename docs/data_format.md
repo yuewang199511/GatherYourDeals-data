@@ -87,7 +87,7 @@ The client will provide a update meta API to update the description of a certain
 
 These keys will always exist to support the definitions of fields that the user cannot change:
 
-| fieldName    | description    | type          |
+| fieldName    | description    | field_type          |
 |:-------------|:--------------:|--------------:|
 | productName  | name of product| string        |
 | purchaseDate | purchase date in Y.M.D| string |
