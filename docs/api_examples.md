@@ -94,11 +94,161 @@ Response:
 
 The refresh token is immediately revoked. The access token will expire on its own.
 
-## 6. List all users (admin only)
+## 6. List all fields (meta)
+
+Any authenticated user can list the registered fields:
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  http://localhost:8080/api/v1/meta
+```
+
+Response:
+```json
+[
+  {
+    "fieldName": "productName",
+    "description": "name of the product",
+    "type": "string",
+    "native": true
+  },
+  {
+    "fieldName": "brand",
+    "description": "brand of the product",
+    "type": "string",
+    "native": false
+  }
+]
+```
+
+## 7. Register a new field
+
+Any authenticated user can register a new field:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/meta \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"fieldName": "brand", "description": "brand of the product", "type": "string"}'
+```
+
+Response:
+```json
+{
+  "fieldName": "brand",
+  "description": "brand of the product",
+  "type": "string",
+  "native": false
+}
+```
+
+## 8. Update a field description (admin only)
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/meta/brand \
+  -H "Authorization: Bearer <admin_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"description": "brand or manufacturer of the product"}'
+```
+
+Response:
+```json
+{
+  "message": "description updated"
+}
+```
+
+## 9. Create a receipt
+
+```bash
+curl -X POST http://localhost:8080/api/v1/receipts \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productName": "Milk 2%",
+    "purchaseDate": "2025.04.05",
+    "price": "5.49CAD",
+    "amount": "1",
+    "storeName": "Costco",
+    "latitude": 49.2827,
+    "longitude": -123.1207,
+    "extras": {"brand": "Kirkland"}
+  }'
+```
+
+Response:
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "productName": "Milk 2%",
+  "purchaseDate": "2025.04.05",
+  "price": "5.49CAD",
+  "amount": "1",
+  "storeName": "Costco",
+  "latitude": 49.2827,
+  "longitude": -123.1207,
+  "extras": {"brand": "Kirkland"},
+  "uploadTime": 1770620311,
+  "userId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+The server sets `id`, `uploadTime`, and `userId` automatically. Any key in `extras` must be registered in the meta table, or the request is rejected with 400.
+
+## 10. List own receipts
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  http://localhost:8080/api/v1/receipts
+```
+
+Response:
+```json
+[
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "productName": "Milk 2%",
+    "purchaseDate": "2025.04.05",
+    "price": "5.49CAD",
+    "amount": "1",
+    "storeName": "Costco",
+    "latitude": 49.2827,
+    "longitude": -123.1207,
+    "extras": {"brand": "Kirkland"},
+    "uploadTime": 1770620311,
+    "userId": "550e8400-e29b-41d4-a716-446655440000"
+  }
+]
+```
+
+Returns only receipts belonging to the authenticated user, newest first.
+
+## 11. Get a receipt by ID
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  http://localhost:8080/api/v1/receipts/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+## 12. Delete a receipt
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/receipts/a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "message": "receipt deleted"
+}
+```
+
+## 13. List all users (admin only)
 
 ```bash
 curl -H "Authorization: Bearer <admin_access_token>" \
-  http://localhost:8080/api/v1/admin/users
+  http://localhost:8080/api/v1/users
 ```
 
 Response:
@@ -121,10 +271,10 @@ Response:
 ]
 ```
 
-## 7. Delete a user (admin only)
+## 14. Delete a user (admin only)
 
 ```bash
-curl -X DELETE http://localhost:8080/api/v1/admin/users/661f9511-f30c-52e5-b827-557766551111 \
+curl -X DELETE http://localhost:8080/api/v1/users/661f9511-f30c-52e5-b827-557766551111 \
   -H "Authorization: Bearer <admin_access_token>"
 ```
 
@@ -136,123 +286,3 @@ Response:
 ```
 
 All active refresh tokens for that user are immediately revoked.
-
----
-
-## Python client example
-
-This is a reference implementation for the future Python SDK. It uses
-[`httpx`](https://www.python-httpx.org/) and handles token refresh automatically
-via a custom `Auth` class — the refresh logic runs transparently on every 401
-response so the rest of your code never thinks about token management.
-
-Install the dependency:
-
-```bash
-pip install httpx
-```
-
-```python
-import httpx
-
-
-class GatherYourDealsAuth(httpx.Auth):
-    """
-    httpx Auth flow that handles JWT access + refresh token lifecycle.
-
-    - Attaches the access token to every request.
-    - On a 401 response, transparently refreshes the token pair and retries once.
-    - On a failed refresh, raises GYDAuthError so the caller can re-login.
-    """
-
-    def __init__(self, base_url: str, username: str, password: str):
-        self._base_url = base_url.rstrip("/")
-        self._username = username
-        self._password = password
-        self._access_token: str | None = None
-        self._refresh_token: str | None = None
-
-    # ---- httpx.Auth interface ----
-
-    def auth_flow(self, request: httpx.Request):
-        if self._access_token is None:
-            self._login()
-
-        request.headers["Authorization"] = f"Bearer {self._access_token}"
-        response = yield request
-
-        if response.status_code == 401:
-            self._refresh()
-            request.headers["Authorization"] = f"Bearer {self._access_token}"
-            yield request  # retry once with the new token
-
-    # ---- internal helpers ----
-
-    def _login(self) -> None:
-        with httpx.Client() as client:
-            resp = client.post(
-                f"{self._base_url}/api/v1/auth/login",
-                json={"username": self._username, "password": self._password},
-            )
-        if resp.status_code != 200:
-            raise GYDAuthError(f"Login failed: {resp.status_code} {resp.text}")
-        data = resp.json()
-        self._access_token = data["access_token"]
-        self._refresh_token = data["refresh_token"]
-
-    def _refresh(self) -> None:
-        with httpx.Client() as client:
-            resp = client.post(
-                f"{self._base_url}/api/v1/auth/refresh",
-                json={"refresh_token": self._refresh_token},
-            )
-        if resp.status_code != 200:
-            # Refresh token expired or revoked — caller must re-login
-            self._access_token = None
-            self._refresh_token = None
-            raise GYDAuthError("Session expired, please log in again.")
-        data = resp.json()
-        self._access_token = data["access_token"]
-        self._refresh_token = data["refresh_token"]
-
-    def logout(self) -> None:
-        if self._access_token is None:
-            return
-        with httpx.Client() as client:
-            client.post(
-                f"{self._base_url}/api/v1/auth/logout",
-                headers={"Authorization": f"Bearer {self._access_token}"},
-                json={"refresh_token": self._refresh_token},
-            )
-        self._access_token = None
-        self._refresh_token = None
-
-
-class GYDAuthError(Exception):
-    pass
-
-
-# ---- usage ----
-
-auth = GatherYourDealsAuth(
-    base_url="http://localhost:8080",
-    username="alice",
-    password="password123",
-)
-
-with httpx.Client(auth=auth) as client:
-    # Login happens automatically on the first request.
-    # Token refresh happens automatically on any 401.
-    resp = client.get("http://localhost:8080/api/v1/auth/me")
-    print(resp.json())
-
-# Logout explicitly when done
-auth.logout()
-```
-
-Key design decisions for the SDK:
-
-- **Lazy login** — credentials are not sent until the first actual request, avoiding unnecessary network calls on construction.
-- **Single retry** — on a 401, refresh and retry exactly once. A second 401 after refresh means the server genuinely rejected the request (e.g. wrong permissions), not an expiry issue.
-- **Stateless from the caller's perspective** — the caller just creates the `auth` object and passes it to `httpx.Client`. Token management is invisible.
-- **Explicit logout** — the caller calls `auth.logout()` to revoke the refresh token. Letting the object go out of scope without logging out leaves the refresh token alive until it expires naturally.

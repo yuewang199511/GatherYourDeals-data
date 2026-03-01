@@ -47,10 +47,10 @@ func setupEnv(t *testing.T) *testEnv {
 	)
 
 	authHandler := handler.NewAuthHandler(authService, tokens)
-	adminHandler := handler.NewAdminHandler(userRepo)
+	userHandler := handler.NewUserHandler(userRepo)
 	metaHandler := handler.NewMetaHandler(metaRepo)
 	receiptHandler := handler.NewReceiptHandler(receiptRepo)
-	r := handler.NewRouter(authHandler, adminHandler, metaHandler, receiptHandler, tokens)
+	r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokens)
 
 	return &testEnv{
 		router:      r,
@@ -439,7 +439,7 @@ func TestAdminListUsers(t *testing.T) {
 	token := env.getAdminToken(t)
 	env.getUserToken(t, "alice", "password123") // create a regular user too
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -466,7 +466,7 @@ func TestAdminDeleteUser(t *testing.T) {
 		t.Fatalf("Register failed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+user.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+user.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -480,7 +480,7 @@ func TestAdminDeleteUser_NotFound(t *testing.T) {
 	env := setupEnv(t)
 	token := env.getAdminToken(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/nonexistent-id", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/nonexistent-id", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
@@ -504,7 +504,7 @@ func TestAdminDeleteUser_RevokesRefreshTokens(t *testing.T) {
 	}
 
 	// Delete the user
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+user.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+user.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	env.router.ServeHTTP(httptest.NewRecorder(), req)
 
@@ -529,8 +529,8 @@ func TestAdminEndpoints_ForbiddenForRegularUser(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/api/v1/admin/users"},
-		{http.MethodDelete, "/api/v1/admin/users/some-id"},
+		{http.MethodGet, "/api/v1/users"},
+		{http.MethodDelete, "/api/v1/users/some-id"},
 	}
 
 	for _, ep := range endpoints {
@@ -585,14 +585,14 @@ func TestMeta_ListFields_Unauthenticated(t *testing.T) {
 
 func TestMeta_CreateField(t *testing.T) {
 	env := setupEnv(t)
-	token := env.getAdminToken(t)
+	token := env.getUserToken(t, "alice", "password123")
 
 	body := jsonBody(t, map[string]string{
 		"fieldName":   "brand",
 		"description": "brand of the product",
 		"type":        "string",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -613,7 +613,7 @@ func TestMeta_CreateField(t *testing.T) {
 
 func TestMeta_CreateField_Duplicate(t *testing.T) {
 	env := setupEnv(t)
-	token := env.getAdminToken(t)
+	token := env.getUserToken(t, "alice", "password123")
 
 	body := jsonBody(t, map[string]string{
 		"fieldName":   "brand",
@@ -622,7 +622,7 @@ func TestMeta_CreateField_Duplicate(t *testing.T) {
 	})
 
 	// First create
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	env.router.ServeHTTP(httptest.NewRecorder(), req)
@@ -633,7 +633,7 @@ func TestMeta_CreateField_Duplicate(t *testing.T) {
 		"description": "duplicate",
 		"type":        "string",
 	})
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -646,10 +646,10 @@ func TestMeta_CreateField_Duplicate(t *testing.T) {
 
 func TestMeta_CreateField_MissingFields(t *testing.T) {
 	env := setupEnv(t)
-	token := env.getAdminToken(t)
+	token := env.getUserToken(t, "alice", "password123")
 
 	body := jsonBody(t, map[string]string{"fieldName": "brand"}) // missing description and type
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -660,24 +660,21 @@ func TestMeta_CreateField_MissingFields(t *testing.T) {
 	}
 }
 
-func TestMeta_CreateField_ForbiddenForRegularUser(t *testing.T) {
+func TestMeta_CreateField_Unauthenticated(t *testing.T) {
 	env := setupEnv(t)
-	env.getAdminToken(t)
-	userToken := env.getUserToken(t, "alice", "password123")
 
 	body := jsonBody(t, map[string]string{
 		"fieldName":   "brand",
 		"description": "brand of the product",
 		"type":        "string",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
-	req.Header.Set("Authorization", "Bearer "+userToken)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -685,20 +682,20 @@ func TestMeta_UpdateDescription(t *testing.T) {
 	env := setupEnv(t)
 	token := env.getAdminToken(t)
 
-	// Create a field first
+	// Create a field first (any authenticated user can do this)
 	body := jsonBody(t, map[string]string{
 		"fieldName":   "brand",
 		"description": "original",
 		"type":        "string",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	env.router.ServeHTTP(httptest.NewRecorder(), req)
 
 	// Update
 	body = jsonBody(t, map[string]string{"description": "updated description"})
-	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/meta/brand", body)
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/meta/brand", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -714,7 +711,7 @@ func TestMeta_UpdateDescription_NotFound(t *testing.T) {
 	token := env.getAdminToken(t)
 
 	body := jsonBody(t, map[string]string{"description": "nope"})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/meta/nonexistent", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/meta/nonexistent", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -731,7 +728,7 @@ func TestMeta_UpdateDescription_ForbiddenForRegularUser(t *testing.T) {
 	userToken := env.getUserToken(t, "alice", "password123")
 
 	body := jsonBody(t, map[string]string{"description": "nope"})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/meta/productName", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/meta/productName", body)
 	req.Header.Set("Authorization", "Bearer "+userToken)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -784,17 +781,16 @@ func TestReceipt_Create(t *testing.T) {
 
 func TestReceipt_Create_WithExtras(t *testing.T) {
 	env := setupEnv(t)
-	adminToken := env.getAdminToken(t)
 	userToken := env.getUserToken(t, "alice", "password123")
 
-	// Admin registers the custom field
+	// User registers the custom field
 	body := jsonBody(t, map[string]string{
 		"fieldName":   "brand",
 		"description": "brand of the product",
 		"type":        "string",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/meta", body)
-	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/meta", body)
+	req.Header.Set("Authorization", "Bearer "+userToken)
 	req.Header.Set("Content-Type", "application/json")
 	env.router.ServeHTTP(httptest.NewRecorder(), req)
 

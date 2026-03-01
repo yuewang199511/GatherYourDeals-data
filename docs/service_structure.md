@@ -13,27 +13,40 @@ GatherYourDeals-data/
 │   ├── handler/
 │   │   ├── auth.go                      # HTTP handlers: register, login, refresh, logout, me
 │   │   ├── admin.go                     # HTTP handlers: list users, delete user (admin only)
+│   │   ├── meta.go                      # HTTP handlers: list fields, create field, update description
+│   │   ├── receipt.go                   # HTTP handlers: create, list, get, delete receipts
 │   │   └── router.go                    # Route registration
 │   ├── middleware/
 │   │   └── auth.go                      # Bearer token validation, role enforcement
 │   ├── model/
-│   │   └── user.go                      # User struct, Role type, role constants
+│   │   ├── user.go                      # User struct, Role type, role constants
+│   │   ├── meta.go                      # MetaField struct
+│   │   └── receipt.go                   # Receipt struct, sentinel errors
 │   └── repository/
-│       ├── repository.go                # Interface definitions (UserRepository)
+│       ├── repository.go                # Interface definitions (UserRepository, MetaFieldRepository, ReceiptRepository)
 │       └── sqlite/
 │           ├── sqlite.go                # SQLite connection, goose migration runner
 │           ├── user.go                  # SQLite implementation of UserRepository
 │           ├── refresh_token.go         # SQLite implementation of auth.RefreshTokenStore
+│           ├── meta_field.go            # SQLite implementation of MetaFieldRepository
+│           ├── receipt.go               # SQLite implementation of ReceiptRepository
+│           ├── testutil/
+│           │   └── testutil.go          # In-memory test database helper
 │           └── migrations/              # SQL migration files (embedded via go:embed)
 │               ├── 00001_create_users_table.sql
-│               └── 00003_create_refresh_tokens_table.sql
+│               ├── 00003_create_refresh_tokens_table.sql
+│               ├── 00004_create_meta_fields_table.sql
+│               └── 00005_create_receipts_table.sql
 ├── docs/
-│   ├── api.yaml
-│   ├── api_examples.md
-│   ├── connection_and_auth.md
-│   ├── data_format.md
-│   └── service_structure.md
+│   ├── api.yaml                         # OpenAPI 3.0 specification
+│   ├── api_examples.md                  # curl examples for every endpoint
+│   ├── connection_and_auth.md           # Hosting, auth design, access keys
+│   ├── data_format.md                   # Purchase record format, metadata, ETL process
+│   └── service_structure.md             # This file — project layout, design decisions
+├── .github/workflows/                   # CI/CD: build, test, code quality, security
 ├── config.yaml
+├── docker-compose.yml
+├── Dockerfile
 ├── .env.example
 ├── go.mod
 └── README.md
@@ -55,6 +68,32 @@ Build:
 go build -o gatheryourdeals ./cmd/gatheryourdeals
 ```
 
+# API Route Summary
+
+## Public
+| Method | Path | Description |
+|:-------|:-----|:------------|
+| POST | `/api/v1/users` | Register a new user |
+| POST | `/api/v1/auth/login` | Login |
+| POST | `/api/v1/auth/refresh` | Refresh access token |
+
+## Authenticated
+| Method | Path | Description |
+|:-------|:-----|:------------|
+| POST | `/api/v1/auth/logout` | Logout (revoke refresh token) |
+| GET | `/api/v1/auth/me` | Current user info |
+| GET | `/api/v1/meta` | List all registered fields |
+| POST | `/api/v1/meta` | Register a new field |
+| PUT | `/api/v1/meta/:fieldName` | Update a field description (admin only) |
+| GET | `/api/v1/users` | List all users (admin only) |
+| DELETE | `/api/v1/users/:id` | Delete a user (admin only) |
+| POST | `/api/v1/receipts` | Create a receipt |
+| GET | `/api/v1/receipts` | List own receipts |
+| GET | `/api/v1/receipts/:id` | Get a receipt by ID |
+| DELETE | `/api/v1/receipts/:id` | Delete a receipt |
+
+Endpoints marked **(admin only)** check the user's role inside the handler and return 403 if the user is not an admin.
+
 # Design Decisions
 
 ## Single Binary
@@ -67,7 +106,7 @@ The service is its own authentication provider — it owns the user database and
 
 The replacement is direct JWT authentication:
 
-- **Login** (`POST /api/v1/sessions`) verifies the password and returns a signed JWT access token plus a refresh token.
+- **Login** (`POST /api/v1/auth/login`) verifies the password and returns a signed JWT access token plus a refresh token.
 - **Access tokens** are stateless JWTs verified by HMAC-SHA256 signature. No database lookup is needed per request. The user's role is embedded in the token claims.
 - **Refresh tokens** are stored in the `refresh_tokens` SQLite table for revocation support. They are rotated on every use — the old token is deleted and a new pair is issued.
 - **Logout** deletes the refresh token from the database. The access token expires naturally.
@@ -87,6 +126,12 @@ The secret is an HMAC-SHA256 signing key loaded from the `GYD_JWT_SECRET` enviro
 SQLite is the default — no separate database server, one file, trivial to back up, minimal resources (suitable for a Raspberry Pi or cheap VPS).
 
 The tradeoff is that SQLite supports only a single writer at a time, so you can only run one app instance. If you need horizontal scaling, replace SQLite with PostgreSQL by implementing `repository/postgres/`. The repository interface makes this a clean swap with no changes to business logic or handlers.
+
+## Flexible Schema with JSON Extras
+
+Purchase records have fixed columns for the native fields (productName, price, storeName, etc.) and a JSON `extras` column for user-defined fields. This gives you the best of both worlds: efficient SQL queries on common fields, and flexibility for custom data.
+
+Every key in `extras` must be registered in the `meta_fields` table before it can be used. This prevents typos and ensures every field has a description. The meta table is append-only — fields cannot be deleted, because existing receipts may reference them.
 
 ## Migrations with Goose
 

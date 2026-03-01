@@ -89,10 +89,10 @@ func serveCmd() *cobra.Command {
 
 			// Handlers + router
 			authHandler := handler.NewAuthHandler(authService, tokenService)
-			adminHandler := handler.NewAdminHandler(userRepo)
+			userHandler := handler.NewUserHandler(userRepo)
 			metaHandler := handler.NewMetaHandler(metaRepo)
 			receiptHandler := handler.NewReceiptHandler(receiptRepo)
-			r := handler.NewRouter(authHandler, adminHandler, metaHandler, receiptHandler, tokenService)
+			r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService)
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
 			log.Printf("server starting on %s", addr)

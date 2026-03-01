@@ -106,6 +106,9 @@ func (r *ReceiptRepo) validateExtras(ctx context.Context, extras map[string]inte
 		if field == nil {
 			return fmt.Errorf("%w: %q", model.ErrFieldNotRegistered, key)
 		}
+		if field.Native {
+			return fmt.Errorf("%w: %q is a native field and cannot be used in extras", model.ErrFieldNotRegistered, key)
+		}
 	}
 	return nil
 }

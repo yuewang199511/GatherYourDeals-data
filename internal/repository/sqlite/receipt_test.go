@@ -171,6 +171,19 @@ func TestReceipt_WithExtras(t *testing.T) {
 	}
 }
 
+func TestReceipt_ExtrasValidation_NativeFieldRejected(t *testing.T) {
+	env := newReceiptEnv(t)
+	env.seedUser(t, "user-1")
+
+	rec := env.sampleReceipt("r-1", "user-1")
+	rec.Extras = map[string]interface{}{"productName": "duplicate"}
+
+	err := env.receipts.CreateReceipt(env.ctx, rec)
+	if err == nil {
+		t.Fatal("expected error for native field in extras, got nil")
+	}
+}
+
 func TestReceipt_ExtrasValidation_UnregisteredField(t *testing.T) {
 	env := newReceiptEnv(t)
 	env.seedUser(t, "user-1")
