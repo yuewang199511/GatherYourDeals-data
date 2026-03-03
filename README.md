@@ -83,3 +83,7 @@ log:
 - **SQLite with WAL mode** — lightweight, no setup required
 - **Swappable database** — repository pattern allows switching to PostgreSQL
 - **Embedded migrations** — schema managed by goose, compiled into the binary
+
+# Future plan for deployment
+
+⚠️compare price between railway and AWS
