@@ -53,6 +53,27 @@ The receipt data should be **provided** as a list of dictionaries in this format
 
 ````
 
+
+⚠️⚠️⚠️ There is no dedicated field called ``extrakeys``, it is just a placeholder represent all possible new fields a user can define. For example, you can write 
+
+
+````json
+{
+    "productName": "name of the item",
+    "purchaseDate": 2025.04.05,
+    "price": "1.56CAD",
+    "amount": "1 or 2lb",
+    "storeName": "some store",
+    "latitude": 49.2827,
+    "longitude": -123.1207,
+    "highSugar": false,
+    "veganFriendly": true
+}
+
+````
+
+and the service will record the extra fields if they exist in ``Metadata``.
+
 ## Metadata
 
 In order to provide a flexible database that can accommodate possible analysis and user features, we allow the data maintainer to add any possible fields and explain their usage.
