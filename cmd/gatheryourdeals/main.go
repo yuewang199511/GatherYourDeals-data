@@ -14,6 +14,7 @@ import (
 	"github.com/gatheryourdeals/data/internal/handler"
 	"github.com/gatheryourdeals/data/internal/logger"
 	"github.com/gatheryourdeals/data/internal/repository"
+	"github.com/gatheryourdeals/data/internal/repository/postgres"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -47,7 +48,7 @@ type repos struct {
 	Users        repository.UserRepository
 	Meta         repository.MetaFieldRepository
 	Receipts     repository.ReceiptRepository
-	RefreshStore *sqlite.RefreshTokenStore // TODO: extract interface when adding postgres
+	RefreshStore auth.RefreshTokenStore
 	closer       io.Closer
 }
 
@@ -64,21 +65,36 @@ func openDatabase() (*config.Config, *repos, error) {
 		return nil, nil, fmt.Errorf("load config: %w", err)
 	}
 
-	// Currently only SQLite is supported. When adding PostgreSQL,
-	// switch on a cfg.Database.Driver field here.
-	db, err := sqlite.New(cfg.Database.Path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open database: %w", err)
-	}
-
-	metaRepo := sqlite.NewMetaFieldRepo(db)
-
-	r := &repos{
-		Users:        sqlite.NewUserRepo(db),
-		Meta:         metaRepo,
-		Receipts:     sqlite.NewReceiptRepo(db, metaRepo),
-		RefreshStore: sqlite.NewRefreshTokenStore(db),
-		closer:       db,
+	var r *repos
+	switch cfg.Database.Driver {
+	case "postgres":
+		slog.Info("database: using postgres")
+		db, err := postgres.New(cfg.Database.EffectiveDSN())
+		if err != nil {
+			return nil, nil, fmt.Errorf("open database: %w", err)
+		}
+		metaRepo := postgres.NewMetaFieldRepo(db)
+		r = &repos{
+			Users:        postgres.NewUserRepo(db),
+			Meta:         metaRepo,
+			Receipts:     postgres.NewReceiptRepo(db, metaRepo),
+			RefreshStore: postgres.NewRefreshTokenStore(db),
+			closer:       db,
+		}
+	default: // "sqlite"
+		slog.Info("database: using sqlite", "path", cfg.Database.Path)
+		db, err := sqlite.New(cfg.Database.Path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open database: %w", err)
+		}
+		metaRepo := sqlite.NewMetaFieldRepo(db)
+		r = &repos{
+			Users:        sqlite.NewUserRepo(db),
+			Meta:         metaRepo,
+			Receipts:     sqlite.NewReceiptRepo(db, metaRepo),
+			RefreshStore: sqlite.NewRefreshTokenStore(db),
+			closer:       db,
+		}
 	}
 	return cfg, r, nil
 }

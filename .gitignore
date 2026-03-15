@@ -1,4 +1,4 @@
-# Runtime data (database + Redis persistence)
+# Runtime data (database files + logs)
 /data/
 
 # Log files
@@ -36,3 +36,9 @@ nginx.conf
 
 # build
 gatheryourdeals
+
+# LLM settings
+.claude/
+.specify/
+CLAUDE.md
+specs/

@@ -4,7 +4,7 @@ The data service for the GatherYourDeals project. It provides a server for stori
 
 ![GatherYourDeals-data](./GatherYourDeals-data.png)
 
-## Quick Start (without Docker)
+## Quick Start (without Docker) — SQLite
 
 **Prerequisites:** Go 1.25+, GCC (required by the SQLite driver)
 
@@ -16,6 +16,26 @@ export GYD_JWT_SECRET="$(openssl rand -hex 32)"
 ./gatheryourdeals init      # create database and admin account
 ./gatheryourdeals serve     # start the server on :8080
 ```
+
+## Quick Start (without Docker) — PostgreSQL
+
+**Prerequisites:** Go 1.25+, GCC, a reachable PostgreSQL instance
+
+```bash
+go mod tidy
+go build -o gatheryourdeals ./cmd/gatheryourdeals
+
+export GYD_JWT_SECRET="$(openssl rand -hex 32)"
+export GYD_DATABASE_DRIVER=postgres
+export DATABASE_URL="postgres://user:password@host:5432/dbname?sslmode=require"
+
+./gatheryourdeals init      # create schema and admin account in PostgreSQL
+./gatheryourdeals serve     # start the server on :8080
+```
+
+Supported cloud platforms: **Railway**, **Azure Database for PostgreSQL**, **Supabase**, **Neon**.
+On Railway, `DATABASE_URL` is injected automatically — just set `GYD_DATABASE_DRIVER=postgres`
+in your service's environment variables.
 
 Logs are written to both stdout and rotating files in `./logs/`.
 
@@ -80,8 +100,8 @@ log:
 - **Role-based access** — admin and user roles enforced on every request
 - **Flexible schema** — native fields as columns, user-defined fields as JSON
 - **Structured logging** — stdout + rotating log files, Gin and app logs unified
-- **SQLite with WAL mode** — lightweight, no setup required
-- **Swappable database** — repository pattern allows switching to PostgreSQL
+- **SQLite with WAL mode** — lightweight, no setup required, default for local use
+- **PostgreSQL support** — set `GYD_DATABASE_DRIVER=postgres` for cloud deployment
 - **Embedded migrations** — schema managed by goose, compiled into the binary
 
 # Future plan for deployment

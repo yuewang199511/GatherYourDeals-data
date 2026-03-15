@@ -1,0 +1,35 @@
+# Docker Compose override for local development with PostgreSQL.
+#
+# Use this file together with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml run --build --rm app init
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+#
+# Required .env entries (in addition to GYD_JWT_SECRET):
+#   DATABASE_URL=postgres://gyd:gyd@postgres:5432/gatheryourdeals?sslmode=disable
+#
+# The default docker-compose.yml (SQLite) is unchanged and continues to work as before.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gyd
+      POSTGRES_PASSWORD: gyd
+      POSTGRES_DB: gatheryourdeals
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gyd -d gatheryourdeals"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    environment:
+      - GYD_DATABASE_DRIVER=postgres
+      - DATABASE_URL=${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+

@@ -23,7 +23,17 @@ type ServerConfig struct {
 
 // DBConfig holds database settings.
 type DBConfig struct {
-	Path string `yaml:"path"`
+	Driver string `yaml:"driver"` // "sqlite" (default) or "postgres"
+	Path   string `yaml:"path"`   // SQLite file path or PostgreSQL connection string
+}
+
+// EffectiveDSN returns the database connection string.
+// DATABASE_URL env var takes precedence over the config file path value.
+func (c *DBConfig) EffectiveDSN() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
+	}
+	return c.Path
 }
 
 // LogConfig holds logging settings.
@@ -41,6 +51,7 @@ type AuthConfig struct {
 }
 
 // Load reads the config from a YAML file at the given path.
+// After parsing, GYD_DATABASE_DRIVER env var overrides database.driver if set.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -50,6 +61,11 @@ func Load(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config file: %w", err)
+	}
+
+	// Allow GYD_DATABASE_DRIVER to override the config file driver value.
+	if d := os.Getenv("GYD_DATABASE_DRIVER"); d != "" {
+		cfg.Database.Driver = d
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -82,6 +98,15 @@ func (c *AuthConfig) GetRefreshTokenDuration() (time.Duration, error) {
 func (c *Config) validate() error {
 	if c.Server.Port == "" {
 		c.Server.Port = "8080"
+	}
+	if c.Database.Driver == "" {
+		c.Database.Driver = "sqlite"
+	}
+	switch c.Database.Driver {
+	case "sqlite", "postgres":
+		// valid
+	default:
+		return fmt.Errorf("unsupported database driver: %q (must be \"sqlite\" or \"postgres\")", c.Database.Driver)
 	}
 	if c.Database.Path == "" {
 		c.Database.Path = "gatheryourdeals.db"
