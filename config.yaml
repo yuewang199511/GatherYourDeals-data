@@ -2,6 +2,11 @@ server:
   port: "8080"
 
 database:
+  # "sqlite" (default) or "postgres"
+  # Override with the GYD_DATABASE_DRIVER environment variable.
+  driver: "sqlite"
+  # For sqlite: file path. For postgres: URI or key-value DSN.
+  # The DATABASE_URL environment variable overrides this value.
   path: "gatheryourdeals.db"
 
 auth:

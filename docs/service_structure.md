@@ -24,15 +24,26 @@ GatherYourDeals-data/
 │   │   └── receipt.go                   # Receipt struct, sentinel errors
 │   └── repository/
 │       ├── repository.go                # Interface definitions (UserRepository, MetaFieldRepository, ReceiptRepository)
-│       └── sqlite/
-│           ├── sqlite.go                # SQLite connection, goose migration runner
-│           ├── user.go                  # SQLite implementation of UserRepository
-│           ├── refresh_token.go         # SQLite implementation of auth.RefreshTokenStore
-│           ├── meta_field.go            # SQLite implementation of MetaFieldRepository
-│           ├── receipt.go               # SQLite implementation of ReceiptRepository
-│           ├── testutil/
-│           │   └── testutil.go          # In-memory test database helper
-│           └── migrations/              # SQL migration files (embedded via go:embed)
+│       ├── sqlite/
+│       │   ├── sqlite.go                # SQLite connection, goose migration runner
+│       │   ├── user.go                  # SQLite implementation of UserRepository
+│       │   ├── refresh_token.go         # SQLite implementation of auth.RefreshTokenStore
+│       │   ├── meta_field.go            # SQLite implementation of MetaFieldRepository
+│       │   ├── receipt.go               # SQLite implementation of ReceiptRepository
+│       │   ├── testutil/
+│       │   │   └── testutil.go          # In-memory test database helper
+│       │   └── migrations/              # SQL migration files (embedded via go:embed)
+│       │       ├── 00001_create_users_table.sql
+│       │       ├── 00003_create_refresh_tokens_table.sql
+│       │       ├── 00004_create_meta_fields_table.sql
+│       │       └── 00005_create_receipts_table.sql
+│       └── postgres/
+│           ├── postgres.go              # PostgreSQL connection, goose migration runner
+│           ├── user.go                  # PostgreSQL implementation of UserRepository
+│           ├── refresh_token.go         # PostgreSQL implementation of auth.RefreshTokenStore
+│           ├── meta_field.go            # PostgreSQL implementation of MetaFieldRepository
+│           ├── receipt.go               # PostgreSQL implementation of ReceiptRepository
+│           └── migrations/              # PostgreSQL-compatible SQL files (embedded via go:embed)
 │               ├── 00001_create_users_table.sql
 │               ├── 00003_create_refresh_tokens_table.sql
 │               ├── 00004_create_meta_fields_table.sql
@@ -46,6 +57,7 @@ GatherYourDeals-data/
 ├── .github/workflows/                   # CI/CD: build, test, code quality, security
 ├── config.yaml
 ├── docker-compose.yml
+├── docker-compose.postgres.yml          # Optional overlay for local PostgreSQL dev
 ├── Dockerfile
 ├── .env.example
 ├── go.mod
