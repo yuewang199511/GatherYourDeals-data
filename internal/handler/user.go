@@ -21,17 +21,24 @@ func NewUserHandler(users repository.UserRepository) *UserHandler {
 }
 
 // ListUsers handles GET /api/v1/users — admin only.
+// Returns a paginated list of all registered users.
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	if !requireAdmin(c) {
 		return
 	}
 
-	users, err := h.users.ListUsers(c.Request.Context())
+	params, err := parsePaginationParams(c, "created_at", "", userSortFields)
+	if err != nil {
+		return
+	}
+
+	page, err := h.users.ListUsers(c.Request.Context(), params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
 		return
 	}
-	c.JSON(http.StatusOK, users)
+
+	c.JSON(http.StatusOK, page)
 }
 
 // DeleteUser handles DELETE /api/v1/users/:id — admin only.

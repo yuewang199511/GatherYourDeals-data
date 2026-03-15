@@ -31,14 +31,21 @@ type updateDescriptionRequest struct {
 }
 
 // ListFields handles GET /api/v1/meta
-// Returns all registered fields (native + user-defined).
+// Returns a paginated list of all registered fields (native + user-defined).
 func (h *MetaHandler) ListFields(c *gin.Context) {
-	fields, err := h.meta.ListFields(c.Request.Context())
+	// Meta fields default to ascending order (alphabetical by name).
+	params, err := parsePaginationParams(c, "field_name", "ASC", metaSortFields)
+	if err != nil {
+		return
+	}
+
+	page, err := h.meta.ListFields(c.Request.Context(), params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list fields"})
 		return
 	}
-	c.JSON(http.StatusOK, fields)
+
+	c.JSON(http.StatusOK, page)
 }
 
 // CreateField handles POST /api/v1/meta

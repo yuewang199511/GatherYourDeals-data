@@ -14,8 +14,8 @@ type MetaFieldRepository interface {
 	// GetField returns a single field by name.
 	GetField(ctx context.Context, fieldName string) (*model.MetaField, error)
 
-	// ListFields returns all registered fields (native + user-defined).
-	ListFields(ctx context.Context) ([]*model.MetaField, error)
+	// ListFields returns a paginated list of registered fields (native + user-defined).
+	ListFields(ctx context.Context, params model.PaginationParams) (*model.Page[*model.MetaField], error)
 
 	// UpdateDescription updates the description of an existing field.
 	UpdateDescription(ctx context.Context, fieldName string, description string) error
@@ -29,8 +29,8 @@ type ReceiptRepository interface {
 	// GetReceiptByID returns a single receipt by its ID.
 	GetReceiptByID(ctx context.Context, id string) (*model.Receipt, error)
 
-	// ListReceipts returns all receipts for a given user.
-	ListReceiptsByUser(ctx context.Context, userID string) ([]*model.Receipt, error)
+	// ListReceiptsByUser returns a paginated list of receipts for a given user.
+	ListReceiptsByUser(ctx context.Context, userID string, params model.PaginationParams) (*model.Page[*model.Receipt], error)
 
 	// DeleteReceipt removes a receipt by its ID.
 	DeleteReceipt(ctx context.Context, id string) error
@@ -50,8 +50,8 @@ type UserRepository interface {
 	// UpdatePassword updates the password hash for a user.
 	UpdatePassword(ctx context.Context, id string, passwordHash string) error
 
-	// ListUsers returns all registered users.
-	ListUsers(ctx context.Context) ([]*model.User, error)
+	// ListUsers returns a paginated list of registered users.
+	ListUsers(ctx context.Context, params model.PaginationParams) (*model.Page[*model.User], error)
 
 	// DeleteUser removes a user by their ID.
 	DeleteUser(ctx context.Context, id string) error

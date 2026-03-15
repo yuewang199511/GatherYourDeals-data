@@ -448,12 +448,13 @@ func TestAdminListUsers(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var users []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
-	if len(users) < 2 {
-		t.Errorf("expected at least 2 users, got %d", len(users))
+	data := resp["data"].([]interface{})
+	if len(data) < 2 {
+		t.Errorf("expected at least 2 users, got %d", len(data))
 	}
 }
 
@@ -562,12 +563,13 @@ func TestMeta_ListFields(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var fields []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if len(fields) != 7 {
-		t.Errorf("expected 7 native fields, got %d", len(fields))
+	data := resp["data"].([]interface{})
+	if len(data) != 7 {
+		t.Errorf("expected 7 native fields, got %d", len(data))
 	}
 }
 
@@ -970,12 +972,13 @@ func TestReceipt_List(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var receipts []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if len(receipts) != 2 {
-		t.Errorf("expected 2 receipts, got %d", len(receipts))
+	data := resp["data"].([]interface{})
+	if len(data) != 2 {
+		t.Errorf("expected 2 receipts, got %d", len(data))
 	}
 }
 
@@ -992,12 +995,13 @@ func TestReceipt_List_Empty(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var receipts []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if len(receipts) != 0 {
-		t.Errorf("expected empty list, got %d", len(receipts))
+	data := resp["data"].([]interface{})
+	if len(data) != 0 {
+		t.Errorf("expected empty list, got %d", len(data))
 	}
 }
 
@@ -1025,12 +1029,13 @@ func TestReceipt_List_OnlyOwnReceipts(t *testing.T) {
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, req)
 
-	var receipts []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &receipts); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if len(receipts) != 0 {
-		t.Errorf("expected 0 receipts for bob, got %d", len(receipts))
+	data := resp["data"].([]interface{})
+	if len(data) != 0 {
+		t.Errorf("expected 0 receipts for bob, got %d", len(data))
 	}
 }
 
@@ -1090,5 +1095,415 @@ func TestReceipt_Delete_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ===========================================================================
+// Receipt pagination tests (T012)
+// ===========================================================================
+
+func createReceipt(t *testing.T, env *testEnv, token, productName, date string) {
+	t.Helper()
+	body := jsonBody(t, map[string]interface{}{
+		"productName":  productName,
+		"purchaseDate": date,
+		"price":        "5.49CAD",
+		"amount":       "1",
+		"storeName":    "Costco",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/receipts", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("failed to create receipt: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_Pagination_Envelope(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+	createReceipt(t, env, token, "Milk", "2025.01.01")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if _, ok := resp["data"]; !ok {
+		t.Error("expected 'data' key in response")
+	}
+	if _, ok := resp["total"]; !ok {
+		t.Error("expected 'total' key in response")
+	}
+	if _, ok := resp["offset"]; !ok {
+		t.Error("expected 'offset' key in response")
+	}
+	if _, ok := resp["limit"]; !ok {
+		t.Error("expected 'limit' key in response")
+	}
+	if _, ok := resp["total_pages"]; !ok {
+		t.Error("expected 'total_pages' key in response")
+	}
+}
+
+func TestReceipt_Pagination_LimitOffset(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+	for i, name := range []string{"Milk", "Bread", "Eggs", "Butter", "Juice", "Cheese", "Yogurt"} {
+		createReceipt(t, env, token, name, "2025.01.01")
+		_ = i
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts?limit=5&offset=0", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	data := resp["data"].([]interface{})
+	if len(data) != 5 {
+		t.Errorf("expected 5 items in page, got %d", len(data))
+	}
+	if resp["total"].(float64) != 7 {
+		t.Errorf("expected total 7, got %v", resp["total"])
+	}
+	if resp["total_pages"].(float64) != 2 {
+		t.Errorf("expected total_pages 2, got %v", resp["total_pages"])
+	}
+}
+
+func TestReceipt_Pagination_SortByPurchaseDate(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+	createReceipt(t, env, token, "A", "2025.03.01")
+	createReceipt(t, env, token, "B", "2025.01.01")
+	createReceipt(t, env, token, "C", "2025.02.01")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts?sort_by=purchase_date&sort_order=asc", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	data := resp["data"].([]interface{})
+	if len(data) != 3 {
+		t.Fatalf("expected 3 receipts, got %d", len(data))
+	}
+	first := data[0].(map[string]interface{})
+	if first["purchaseDate"] != "2025.01.01" {
+		t.Errorf("expected first purchaseDate '2025.01.01', got %v", first["purchaseDate"])
+	}
+}
+
+func TestReceipt_Pagination_InvalidSortBy(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts?sort_by=invalid_field", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_Pagination_InvalidLimit(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts?limit=0", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_Pagination_InvalidSortOrder(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts?sort_order=sideways", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReceipt_Pagination_LimitCappedAt100(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/receipts?limit=500", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if resp["limit"].(float64) != 100 {
+		t.Errorf("expected limit capped at 100, got %v", resp["limit"])
+	}
+}
+
+// ===========================================================================
+// User pagination tests (T015)
+// ===========================================================================
+
+func TestAdminListUsers_Pagination_Envelope(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	for _, key := range []string{"data", "total", "offset", "limit", "total_pages"} {
+		if _, ok := resp[key]; !ok {
+			t.Errorf("expected '%s' key in response", key)
+		}
+	}
+}
+
+func TestAdminListUsers_Pagination_LimitOffset(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+	env.getUserToken(t, "alice", "password123")
+	env.getUserToken(t, "bob", "password456")
+
+	// 3 users total (admin + alice + bob); request limit=2&offset=0
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=2&offset=0", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	data := resp["data"].([]interface{})
+	if len(data) != 2 {
+		t.Errorf("expected 2 users in page, got %d", len(data))
+	}
+	if resp["total"].(float64) != 3 {
+		t.Errorf("expected total 3, got %v", resp["total"])
+	}
+}
+
+func TestAdminListUsers_Pagination_SortByUsername(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+	env.getUserToken(t, "zebra", "password123")
+	env.getUserToken(t, "apple", "password456")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?sort_by=username&sort_order=asc&limit=100", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	data := resp["data"].([]interface{})
+	if len(data) < 2 {
+		t.Fatalf("expected at least 2 users, got %d", len(data))
+	}
+	first := data[0].(map[string]interface{})["username"].(string)
+	last := data[len(data)-1].(map[string]interface{})["username"].(string)
+	if first >= last {
+		t.Errorf("expected ascending sort, got first=%q last=%q", first, last)
+	}
+}
+
+func TestAdminListUsers_Pagination_InvalidSortBy(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?sort_by=email", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminListUsers_Pagination_InvalidLimit(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getAdminToken(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=0", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ===========================================================================
+// Meta pagination tests (T018)
+// ===========================================================================
+
+func TestMeta_Pagination_Envelope_AscDefault(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	for _, key := range []string{"data", "total", "offset", "limit", "total_pages"} {
+		if _, ok := resp[key]; !ok {
+			t.Errorf("expected '%s' key in response", key)
+		}
+	}
+	// Verify default ASC ordering: first name alphabetically should be 'amount'
+	data := resp["data"].([]interface{})
+	if len(data) < 2 {
+		t.Fatalf("expected at least 2 fields, got %d", len(data))
+	}
+	first := data[0].(map[string]interface{})["fieldName"].(string)
+	second := data[1].(map[string]interface{})["fieldName"].(string)
+	if first >= second {
+		t.Errorf("expected ASC order by default, got %q then %q", first, second)
+	}
+}
+
+func TestMeta_Pagination_LimitOffset(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	// 7 native fields seeded; request limit=3&offset=3 → 3 items, total=7, total_pages=3
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/meta?limit=3&offset=3", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	data := resp["data"].([]interface{})
+	if len(data) != 3 {
+		t.Errorf("expected 3 items in page, got %d", len(data))
+	}
+	if resp["total"].(float64) != 7 {
+		t.Errorf("expected total 7, got %v", resp["total"])
+	}
+	if resp["total_pages"].(float64) != 3 {
+		t.Errorf("expected total_pages 3, got %v", resp["total_pages"])
+	}
+}
+
+func TestMeta_Pagination_SortByNameDesc(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/meta?sort_by=name&sort_order=desc&limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	data := resp["data"].([]interface{})
+	if len(data) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(data))
+	}
+	first := data[0].(map[string]interface{})["fieldName"].(string)
+	second := data[1].(map[string]interface{})["fieldName"].(string)
+	if first <= second {
+		t.Errorf("expected DESC order, got %q then %q", first, second)
+	}
+}
+
+func TestMeta_Pagination_InvalidSortBy(t *testing.T) {
+	env := setupEnv(t)
+	token := env.getUserToken(t, "alice", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/meta?sort_by=created_at", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }

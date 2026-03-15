@@ -96,7 +96,7 @@ The refresh token is immediately revoked. The access token will expire on its ow
 
 ## 6. List all fields (meta)
 
-Any authenticated user can list the registered fields:
+Any authenticated user can list the registered fields. Results are paginated and sorted by name ascending by default.
 
 ```bash
 curl -H "Authorization: Bearer <access_token>" \
@@ -105,20 +105,42 @@ curl -H "Authorization: Bearer <access_token>" \
 
 Response:
 ```json
-[
-  {
-    "fieldName": "productName",
-    "description": "name of the product",
-    "type": "string",
-    "native": true
-  },
-  {
-    "fieldName": "brand",
-    "description": "brand of the product",
-    "type": "string",
-    "native": false
-  }
-]
+{
+  "data": [
+    {
+      "fieldName": "amount",
+      "description": "quantity purchased",
+      "type": "string",
+      "native": true
+    },
+    {
+      "fieldName": "brand",
+      "description": "brand of the product",
+      "type": "string",
+      "native": false
+    }
+  ],
+  "total": 8,
+  "offset": 0,
+  "limit": 20,
+  "total_pages": 1
+}
+```
+
+**Pagination parameters** (all optional):
+
+| Parameter    | Default    | Description                                          |
+|--------------|------------|------------------------------------------------------|
+| `offset`     | `0`        | Number of records to skip                            |
+| `limit`      | `20`       | Records per page (max 100; over-limit silently capped)|
+| `sort_by`    | `name`     | Sort field — allowed: `name`                         |
+| `sort_order` | `asc`      | Sort direction — `asc` or `desc`                     |
+
+Example — second page of 3:
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  "http://localhost:8080/api/v1/meta?limit=3&offset=3&sort_by=name&sort_order=asc"
 ```
 
 ## 7. Register a new field
@@ -197,6 +219,8 @@ The server sets `id`, `uploadTime`, and `userId` automatically. Native fields be
 
 ## 10. List own receipts
 
+Returns only receipts belonging to the authenticated user. Results are paginated, sorted by upload time descending by default.
+
 ```bash
 curl -H "Authorization: Bearer <access_token>" \
   http://localhost:8080/api/v1/receipts
@@ -204,24 +228,44 @@ curl -H "Authorization: Bearer <access_token>" \
 
 Response:
 ```json
-[
-  {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "productName": "Milk 2%",
-    "purchaseDate": "2025.04.05",
-    "price": "5.49CAD",
-    "amount": "1",
-    "storeName": "Costco",
-    "latitude": 49.2827,
-    "longitude": -123.1207,
-    "brand": "Kirkland",
-    "uploadTime": 1770620311,
-    "userId": "550e8400-e29b-41d4-a716-446655440000"
+{
+  "data": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "productName": "Milk 2%",
+      "purchaseDate": "2025.04.05",
+      "price": "5.49CAD",
+      "amount": "1",
+      "storeName": "Costco",
+      "latitude": 49.2827,
+      "longitude": -123.1207,
+      "brand": "Kirkland",
+      "uploadTime": 1770620311,
+      "userId": "550e8400-e29b-41d4-a716-446655440000"
     }
-]
+  ],
+  "total": 42,
+  "offset": 0,
+  "limit": 20,
+  "total_pages": 3
+}
 ```
 
-Returns only receipts belonging to the authenticated user, newest first.
+**Pagination parameters** (all optional):
+
+| Parameter    | Default       | Description                                           |
+|--------------|---------------|-------------------------------------------------------|
+| `offset`     | `0`           | Number of records to skip                             |
+| `limit`      | `20`          | Records per page (max 100; over-limit silently capped)|
+| `sort_by`    | `created_at`  | Sort field — allowed: `created_at`, `purchase_date`, `price`, `store_name`, `product_name` |
+| `sort_order` | `desc`        | Sort direction — `asc` or `desc`                      |
+
+Example — oldest receipts first, page 2:
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  "http://localhost:8080/api/v1/receipts?limit=10&offset=10&sort_by=purchase_date&sort_order=asc"
+```
 
 ## 11. Get a receipt by ID
 
@@ -246,6 +290,8 @@ Response:
 
 ## 13. List all users (admin only)
 
+Results are paginated, sorted by creation time descending by default.
+
 ```bash
 curl -H "Authorization: Bearer <admin_access_token>" \
   http://localhost:8080/api/v1/users
@@ -253,22 +299,44 @@ curl -H "Authorization: Bearer <admin_access_token>" \
 
 Response:
 ```json
-[
-  {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "username": "admin",
-    "role": "admin",
-    "createdAt": 1739700000,
-    "updatedAt": 1739700000
-  },
-  {
-    "id": "661f9511-f30c-52e5-b827-557766551111",
-    "username": "alice",
-    "role": "user",
-    "createdAt": 1739707200,
-    "updatedAt": 1739707200
-  }
-]
+{
+  "data": [
+    {
+      "id": "661f9511-f30c-52e5-b827-557766551111",
+      "username": "alice",
+      "role": "user",
+      "createdAt": 1739707200,
+      "updatedAt": 1739707200
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "username": "admin",
+      "role": "admin",
+      "createdAt": 1739700000,
+      "updatedAt": 1739700000
+    }
+  ],
+  "total": 2,
+  "offset": 0,
+  "limit": 20,
+  "total_pages": 1
+}
+```
+
+**Pagination parameters** (all optional):
+
+| Parameter    | Default      | Description                                           |
+|--------------|--------------|-------------------------------------------------------|
+| `offset`     | `0`          | Number of records to skip                             |
+| `limit`      | `20`         | Records per page (max 100; over-limit silently capped)|
+| `sort_by`    | `created_at` | Sort field — allowed: `created_at`, `username`, `role`|
+| `sort_order` | `desc`       | Sort direction — `asc` or `desc`                      |
+
+Example — users sorted alphabetically:
+
+```bash
+curl -H "Authorization: Bearer <admin_access_token>" \
+  "http://localhost:8080/api/v1/users?sort_by=username&sort_order=asc"
 ```
 
 ## 14. Delete a user (admin only)

@@ -14,7 +14,7 @@ info:
     4. When the access token expires, call `POST /auth/refresh` with the refresh token to get a new pair
     5. Log out via `POST /auth/logout` — revokes the refresh token
 
-  version: 0.3.0
+  version: 0.4.0
   license:
     name: MIT
 
@@ -43,6 +43,29 @@ components:
       scheme: bearer
       description: JWT access token
 
+  parameters:
+    offsetParam:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: Number of records to skip
+      example: 0
+    limitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Maximum number of records to return. Values above 100 are silently capped to 100.
+      example: 20
+
   schemas:
     Error:
       type: object
@@ -51,6 +74,68 @@ components:
           type: string
       example:
         error: "invalid username or password"
+
+    UserPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+          description: Total number of matching records (ignoring pagination)
+          example: 42
+        offset:
+          type: integer
+          example: 0
+        limit:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          description: "Ceiling division: ceil(total / limit). 0 when total is 0."
+          example: 3
+
+    ReceiptPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Receipt"
+        total:
+          type: integer
+          example: 42
+        offset:
+          type: integer
+          example: 0
+        limit:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          example: 3
+
+    MetaFieldPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaField"
+        total:
+          type: integer
+          example: 8
+        offset:
+          type: integer
+          example: 0
+        limit:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          example: 1
 
     User:
       type: object
@@ -211,19 +296,42 @@ paths:
 
     get:
       summary: List all users
-      description: Returns all registered user accounts. Admin only (role checked inside handler).
+      description: Returns a paginated list of all registered user accounts. Admin only.
       tags: [Admin - Users]
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/offsetParam"
+        - $ref: "#/components/parameters/limitParam"
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [created_at, username, role]
+            default: created_at
+          description: Field to sort by
+        - name: sort_order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Sort direction
       responses:
         "200":
-          description: List of users
+          description: Paginated list of users
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/UserPage"
+        "400":
+          description: Invalid pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid token
           content:
@@ -386,20 +494,44 @@ paths:
     get:
       summary: List all fields
       description: |
-        Returns all registered field definitions, both native (built-in) and user-defined.
-        Any authenticated user can call this endpoint.
+        Returns a paginated list of all registered field definitions, both native (built-in)
+        and user-defined. Any authenticated user can call this endpoint.
+        Default sort is `name asc` (alphabetical).
       tags: [Meta]
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/offsetParam"
+        - $ref: "#/components/parameters/limitParam"
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [name]
+            default: name
+          description: Field to sort by
+        - name: sort_order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Sort direction (default asc for this endpoint)
       responses:
         "200":
-          description: List of fields
+          description: Paginated list of fields
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/MetaField"
+                $ref: "#/components/schemas/MetaFieldPage"
+        "400":
+          description: Invalid pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid token
           content:
@@ -528,19 +660,45 @@ paths:
 
     get:
       summary: List own receipts
-      description: Returns all receipts belonging to the authenticated user, newest first.
+      description: |
+        Returns a paginated list of receipts belonging to the authenticated user.
+        Default sort is `created_at desc` (newest first).
+        The `created_at` sort param maps to the `upload_time` column internally.
       tags: [Receipts]
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/offsetParam"
+        - $ref: "#/components/parameters/limitParam"
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [created_at, purchase_date, price, store_name, product_name]
+            default: created_at
+          description: Field to sort by
+        - name: sort_order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Sort direction
       responses:
         "200":
-          description: List of receipts
+          description: Paginated list of receipts
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Receipt"
+                $ref: "#/components/schemas/ReceiptPage"
+        "400":
+          description: Invalid pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid token
           content:

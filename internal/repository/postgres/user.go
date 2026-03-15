@@ -51,8 +51,34 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, id string, passwordHash s
 	return nil
 }
 
-func (r *UserRepo) ListUsers(ctx context.Context) ([]*model.User, error) {
-	rows, err := r.db.conn.QueryContext(ctx, "SELECT "+userColumns+" FROM users")
+func (r *UserRepo) ListUsers(ctx context.Context, params model.PaginationParams) (*model.Page[*model.User], error) {
+	// Count total users.
+	var total int
+	if err := r.db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count users: %w", err)
+	}
+
+	page := &model.Page[*model.User]{
+		Data:   []*model.User{},
+		Total:  total,
+		Offset: params.Offset,
+		Limit:  params.Limit,
+	}
+	if total > 0 {
+		page.TotalPages = (total + params.Limit - 1) / params.Limit
+	}
+
+	if total == 0 || params.Offset >= total {
+		page.Data = []*model.User{}
+		return page, nil
+	}
+
+	// Fetch paginated data. SortBy and SortOrder are validated by the handler.
+	query := fmt.Sprintf(
+		`SELECT `+userColumns+` FROM users ORDER BY %s %s LIMIT $1 OFFSET $2`,
+		params.SortBy, params.SortOrder,
+	)
+	rows, err := r.db.conn.QueryContext(ctx, query, params.Limit, params.Offset)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -66,7 +92,14 @@ func (r *UserRepo) ListUsers(ctx context.Context) ([]*model.User, error) {
 		}
 		users = append(users, u)
 	}
-	return users, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if users == nil {
+		users = []*model.User{}
+	}
+	page.Data = users
+	return page, nil
 }
 
 func (r *UserRepo) DeleteUser(ctx context.Context, id string) error {

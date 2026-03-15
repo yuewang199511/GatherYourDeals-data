@@ -66,9 +66,36 @@ func (r *ReceiptRepo) GetReceiptByID(ctx context.Context, id string) (*model.Rec
 	return r.scanReceipt(row)
 }
 
-func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string) ([]*model.Receipt, error) {
-	query := `SELECT ` + receiptColumns + ` FROM receipts WHERE user_id = $1 ORDER BY upload_time DESC`
-	rows, err := r.db.conn.QueryContext(ctx, query, userID)
+func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, params model.PaginationParams) (*model.Page[*model.Receipt], error) {
+	// Count total matching records.
+	var total int
+	if err := r.db.conn.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM receipts WHERE user_id = $1`, userID,
+	).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count receipts: %w", err)
+	}
+
+	page := &model.Page[*model.Receipt]{
+		Data:   []*model.Receipt{},
+		Total:  total,
+		Offset: params.Offset,
+		Limit:  params.Limit,
+	}
+	if total > 0 {
+		page.TotalPages = (total + params.Limit - 1) / params.Limit
+	}
+
+	if total == 0 || params.Offset >= total {
+		page.Data = []*model.Receipt{}
+		return page, nil
+	}
+
+	// Fetch paginated data. SortBy and SortOrder are validated by the handler.
+	query := fmt.Sprintf(
+		`SELECT `+receiptColumns+` FROM receipts WHERE user_id = $1 ORDER BY %s %s LIMIT $2 OFFSET $3`,
+		params.SortBy, params.SortOrder,
+	)
+	rows, err := r.db.conn.QueryContext(ctx, query, userID, params.Limit, params.Offset)
 	if err != nil {
 		return nil, fmt.Errorf("list receipts: %w", err)
 	}
@@ -82,7 +109,14 @@ func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string) ([]
 		}
 		receipts = append(receipts, rec)
 	}
-	return receipts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if receipts == nil {
+		receipts = []*model.Receipt{}
+	}
+	page.Data = receipts
+	return page, nil
 }
 
 func (r *ReceiptRepo) DeleteReceipt(ctx context.Context, id string) error {
