@@ -9,12 +9,18 @@ import (
 	"github.com/gatheryourdeals/data/internal/repository/sqlite/testutil"
 )
 
+// defaultMetaParams returns pagination params suitable for tests that don't need
+// to test pagination specifically (fetches all, default sort).
+func defaultMetaParams() model.PaginationParams {
+	return model.PaginationParams{Offset: 0, Limit: 100, SortBy: "field_name", SortOrder: "ASC"}
+}
+
 func TestMetaField_NativeFieldsSeeded(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := sqlite.NewMetaFieldRepo(db)
 	ctx := context.Background()
 
-	fields, err := repo.ListFields(ctx)
+	page, err := repo.ListFields(ctx, defaultMetaParams())
 	if err != nil {
 		t.Fatalf("ListFields failed: %v", err)
 	}
@@ -29,11 +35,11 @@ func TestMetaField_NativeFieldsSeeded(t *testing.T) {
 		"longitude":    true,
 	}
 
-	if len(fields) != len(expected) {
-		t.Fatalf("expected %d native fields, got %d", len(expected), len(fields))
+	if page.Total != len(expected) {
+		t.Fatalf("expected %d native fields, got total %d", len(expected), page.Total)
 	}
 
-	for _, f := range fields {
+	for _, f := range page.Data {
 		if !expected[f.FieldName] {
 			t.Errorf("unexpected field: %s", f.FieldName)
 		}
@@ -182,18 +188,18 @@ func TestMetaField_ListIncludesUserDefined(t *testing.T) {
 		t.Fatalf("CreateField failed: %v", err)
 	}
 
-	fields, err := repo.ListFields(ctx)
+	page, err := repo.ListFields(ctx, defaultMetaParams())
 	if err != nil {
 		t.Fatalf("ListFields failed: %v", err)
 	}
 
 	// 7 native + 1 user-defined
-	if len(fields) != 8 {
-		t.Fatalf("expected 8 fields, got %d", len(fields))
+	if page.Total != 8 {
+		t.Fatalf("expected total 8, got %d", page.Total)
 	}
 
 	found := false
-	for _, f := range fields {
+	for _, f := range page.Data {
 		if f.FieldName == "brand" {
 			found = true
 			if f.Native {
@@ -203,5 +209,73 @@ func TestMetaField_ListIncludesUserDefined(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected to find 'brand' in list")
+	}
+}
+
+func TestMetaField_Pagination_LimitOffset(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := sqlite.NewMetaFieldRepo(db)
+	ctx := context.Background()
+
+	// 7 native fields already seeded; add 3 more to get 10 total.
+	for _, name := range []string{"brand", "color", "size"} {
+		if err := repo.CreateField(ctx, &model.MetaField{
+			FieldName: name, Description: name, FieldType: "string",
+		}); err != nil {
+			t.Fatalf("CreateField %s failed: %v", name, err)
+		}
+	}
+
+	params := model.PaginationParams{Offset: 0, Limit: 3, SortBy: "field_name", SortOrder: "ASC"}
+	page, err := repo.ListFields(ctx, params)
+	if err != nil {
+		t.Fatalf("ListFields failed: %v", err)
+	}
+	if page.Total != 10 {
+		t.Errorf("expected total 10, got %d", page.Total)
+	}
+	if len(page.Data) != 3 {
+		t.Errorf("expected 3 items in page, got %d", len(page.Data))
+	}
+	if page.TotalPages != 4 {
+		t.Errorf("expected total_pages 4 (10/3 = ceil 4), got %d", page.TotalPages)
+	}
+}
+
+func TestMetaField_Pagination_OffsetBeyondTotal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := sqlite.NewMetaFieldRepo(db)
+	ctx := context.Background()
+
+	params := model.PaginationParams{Offset: 100, Limit: 10, SortBy: "field_name", SortOrder: "ASC"}
+	page, err := repo.ListFields(ctx, params)
+	if err != nil {
+		t.Fatalf("ListFields failed: %v", err)
+	}
+	// 7 native fields are seeded.
+	if page.Total != 7 {
+		t.Errorf("expected total 7, got %d", page.Total)
+	}
+	if len(page.Data) != 0 {
+		t.Errorf("expected empty data when offset > total, got %d items", len(page.Data))
+	}
+}
+
+func TestMetaField_Pagination_SortDesc(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := sqlite.NewMetaFieldRepo(db)
+	ctx := context.Background()
+
+	params := model.PaginationParams{Offset: 0, Limit: 2, SortBy: "field_name", SortOrder: "DESC"}
+	page, err := repo.ListFields(ctx, params)
+	if err != nil {
+		t.Fatalf("ListFields failed: %v", err)
+	}
+	if len(page.Data) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(page.Data))
+	}
+	// In DESC order, the last alphabetically should be first.
+	if page.Data[0].FieldName <= page.Data[1].FieldName {
+		t.Errorf("expected descending order, got %q then %q", page.Data[0].FieldName, page.Data[1].FieldName)
 	}
 }

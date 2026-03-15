@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/gatheryourdeals/data/internal/model"
@@ -51,6 +52,12 @@ func (e *receiptEnv) sampleReceipt(id, userID string) *model.Receipt {
 		StoreName:    "Costco",
 		UserID:       userID,
 	}
+}
+
+// defaultReceiptParams returns pagination params suitable for use in tests that
+// don't need to test pagination specifically (fetches all, default sort).
+func defaultReceiptParams() model.PaginationParams {
+	return model.PaginationParams{Offset: 0, Limit: 100, SortBy: "upload_time", SortOrder: "DESC"}
 }
 
 func TestReceipt_CreateAndGetByID(t *testing.T) {
@@ -215,32 +222,144 @@ func TestReceipt_ListByUser(t *testing.T) {
 		t.Fatalf("CreateReceipt failed: %v", err)
 	}
 
-	list, err := env.receipts.ListReceiptsByUser(env.ctx, "user-1")
+	page, err := env.receipts.ListReceiptsByUser(env.ctx, "user-1", defaultReceiptParams())
 	if err != nil {
 		t.Fatalf("ListReceiptsByUser failed: %v", err)
 	}
-	if len(list) != 3 {
-		t.Errorf("expected 3 receipts for user-1, got %d", len(list))
+	if page.Total != 3 {
+		t.Errorf("expected total 3 for user-1, got %d", page.Total)
+	}
+	if len(page.Data) != 3 {
+		t.Errorf("expected 3 receipts in data for user-1, got %d", len(page.Data))
 	}
 
-	list2, err := env.receipts.ListReceiptsByUser(env.ctx, "user-2")
+	page2, err := env.receipts.ListReceiptsByUser(env.ctx, "user-2", defaultReceiptParams())
 	if err != nil {
 		t.Fatalf("ListReceiptsByUser failed: %v", err)
 	}
-	if len(list2) != 1 {
-		t.Errorf("expected 1 receipt for user-2, got %d", len(list2))
+	if page2.Total != 1 {
+		t.Errorf("expected total 1 for user-2, got %d", page2.Total)
 	}
 }
 
 func TestReceipt_ListByUser_Empty(t *testing.T) {
 	env := newReceiptEnv(t)
 
-	list, err := env.receipts.ListReceiptsByUser(env.ctx, "nobody")
+	page, err := env.receipts.ListReceiptsByUser(env.ctx, "nobody", defaultReceiptParams())
 	if err != nil {
 		t.Fatalf("ListReceiptsByUser failed: %v", err)
 	}
-	if list != nil {
-		t.Errorf("expected nil for empty list, got %d items", len(list))
+	if page.Total != 0 {
+		t.Errorf("expected total 0, got %d", page.Total)
+	}
+	if len(page.Data) != 0 {
+		t.Errorf("expected empty data, got %d items", len(page.Data))
+	}
+	if page.Data == nil {
+		t.Error("expected non-nil Data slice, got nil")
+	}
+	if page.TotalPages != 0 {
+		t.Errorf("expected total_pages 0, got %d", page.TotalPages)
+	}
+}
+
+func TestReceipt_Pagination_LimitOffset(t *testing.T) {
+	env := newReceiptEnv(t)
+	env.seedUser(t, "user-1")
+
+	// Create 5 receipts.
+	for i := 1; i <= 5; i++ {
+		rec := env.sampleReceipt(fmt.Sprintf("r-%d", i), "user-1")
+		if err := env.receipts.CreateReceipt(env.ctx, rec); err != nil {
+			t.Fatalf("CreateReceipt r-%d failed: %v", i, err)
+		}
+	}
+
+	params := model.PaginationParams{Offset: 2, Limit: 2, SortBy: "upload_time", SortOrder: "DESC"}
+	page, err := env.receipts.ListReceiptsByUser(env.ctx, "user-1", params)
+	if err != nil {
+		t.Fatalf("ListReceiptsByUser failed: %v", err)
+	}
+	if page.Total != 5 {
+		t.Errorf("expected total 5, got %d", page.Total)
+	}
+	if len(page.Data) != 2 {
+		t.Errorf("expected 2 receipts in page, got %d", len(page.Data))
+	}
+	if page.TotalPages != 3 {
+		t.Errorf("expected total_pages 3, got %d", page.TotalPages)
+	}
+}
+
+func TestReceipt_Pagination_OffsetBeyondTotal(t *testing.T) {
+	env := newReceiptEnv(t)
+	env.seedUser(t, "user-1")
+
+	rec := env.sampleReceipt("r-1", "user-1")
+	if err := env.receipts.CreateReceipt(env.ctx, rec); err != nil {
+		t.Fatalf("CreateReceipt failed: %v", err)
+	}
+
+	params := model.PaginationParams{Offset: 100, Limit: 10, SortBy: "upload_time", SortOrder: "DESC"}
+	page, err := env.receipts.ListReceiptsByUser(env.ctx, "user-1", params)
+	if err != nil {
+		t.Fatalf("ListReceiptsByUser failed: %v", err)
+	}
+	if page.Total != 1 {
+		t.Errorf("expected total 1, got %d", page.Total)
+	}
+	if len(page.Data) != 0 {
+		t.Errorf("expected empty data, got %d items", len(page.Data))
+	}
+}
+
+func TestReceipt_Pagination_TotalPagesExact(t *testing.T) {
+	env := newReceiptEnv(t)
+	env.seedUser(t, "user-1")
+
+	// Create exactly 4 receipts — divisible by limit=2.
+	for i := 1; i <= 4; i++ {
+		rec := env.sampleReceipt(fmt.Sprintf("r-%d", i), "user-1")
+		if err := env.receipts.CreateReceipt(env.ctx, rec); err != nil {
+			t.Fatalf("CreateReceipt r-%d failed: %v", i, err)
+		}
+	}
+
+	params := model.PaginationParams{Offset: 0, Limit: 2, SortBy: "upload_time", SortOrder: "DESC"}
+	page, err := env.receipts.ListReceiptsByUser(env.ctx, "user-1", params)
+	if err != nil {
+		t.Fatalf("ListReceiptsByUser failed: %v", err)
+	}
+	if page.TotalPages != 2 {
+		t.Errorf("expected total_pages 2 (4 records / limit 2), got %d", page.TotalPages)
+	}
+}
+
+func TestReceipt_Pagination_SortByPurchaseDate(t *testing.T) {
+	env := newReceiptEnv(t)
+	env.seedUser(t, "user-1")
+
+	for i, date := range []string{"2025.01.01", "2025.03.01", "2025.02.01"} {
+		rec := env.sampleReceipt(fmt.Sprintf("r-%d", i+1), "user-1")
+		rec.PurchaseDate = date
+		if err := env.receipts.CreateReceipt(env.ctx, rec); err != nil {
+			t.Fatalf("CreateReceipt failed: %v", err)
+		}
+	}
+
+	params := model.PaginationParams{Offset: 0, Limit: 10, SortBy: "purchase_date", SortOrder: "ASC"}
+	page, err := env.receipts.ListReceiptsByUser(env.ctx, "user-1", params)
+	if err != nil {
+		t.Fatalf("ListReceiptsByUser failed: %v", err)
+	}
+	if len(page.Data) != 3 {
+		t.Fatalf("expected 3 receipts, got %d", len(page.Data))
+	}
+	if page.Data[0].PurchaseDate != "2025.01.01" {
+		t.Errorf("expected first receipt date 2025.01.01, got %s", page.Data[0].PurchaseDate)
+	}
+	if page.Data[2].PurchaseDate != "2025.03.01" {
+		t.Errorf("expected last receipt date 2025.03.01, got %s", page.Data[2].PurchaseDate)
 	}
 }
 

@@ -81,7 +81,7 @@ func (h *ReceiptHandler) GetReceipt(c *gin.Context) {
 }
 
 // ListReceipts handles GET /api/v1/receipts
-// Returns all receipts for the authenticated user.
+// Returns a paginated list of receipts for the authenticated user.
 func (h *ReceiptHandler) ListReceipts(c *gin.Context) {
 	userID, exists := c.Get(middleware.ContextKeyUserID)
 	if !exists {
@@ -89,17 +89,18 @@ func (h *ReceiptHandler) ListReceipts(c *gin.Context) {
 		return
 	}
 
-	receipts, err := h.receipts.ListReceiptsByUser(c.Request.Context(), userID.(string))
+	params, err := parsePaginationParams(c, "upload_time", "", receiptSortFields)
+	if err != nil {
+		return
+	}
+
+	page, err := h.receipts.ListReceiptsByUser(c.Request.Context(), userID.(string), params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list receipts"})
 		return
 	}
 
-	if receipts == nil {
-		receipts = []*model.Receipt{}
-	}
-
-	c.JSON(http.StatusOK, receipts)
+	c.JSON(http.StatusOK, page)
 }
 
 // DeleteReceipt handles DELETE /api/v1/receipts/:id
