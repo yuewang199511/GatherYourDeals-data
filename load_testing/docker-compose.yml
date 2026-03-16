@@ -1,0 +1,34 @@
+# Docker Compose for the GatherYourDeals load testing suite.
+#
+# This file defines the Locust service used by run_all.sh and run_group.sh.
+# The runner scripts invoke:
+#   docker compose run --rm locust -f locust/<group>.py --headless ...
+#
+# Setup:
+#   1. cp .env.example .env  (fill in GYD_TEST_USERNAME + GYD_TEST_PASSWORD)
+#   2. mkdir -p results
+#   3. ./run_all.sh              (full suite, ~18 min)
+#   OR ./run_group.sh 2          (single group, both phases)
+#
+# Note on networking:
+#   network_mode: host lets Locust reach http://localhost:8080 on Linux.
+#   On macOS / Windows Docker Desktop set GYD_TARGET_URL=http://host.docker.internal:8080
+
+services:
+  locust:
+    image: locustio/locust:2.32.0
+    network_mode: host
+    working_dir: /home/locust
+    volumes:
+      - ./locust:/home/locust/locust:ro
+      - ./results:/home/locust/results:rw
+    environment:
+      - GYD_TARGET_URL
+      - GYD_TEST_USERNAME
+      - GYD_TEST_PASSWORD
+      - GYD_PLATFORM_NAME
+      - GYD_DB_TYPE
+      - GYD_PHASE
+      - GYD_RESULTS_DIR
+    # entrypoint / command are supplied by the runner scripts via
+    # `docker compose run --rm locust -f locust/... --headless ...`

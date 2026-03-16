@@ -25,6 +25,12 @@ func NewRouter(
 	}
 
 	r := gin.Default()
+
+	// Health check — unauthenticated, outside /api/v1
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
 	v1 := r.Group("/api/v1")
 
 	// Public endpoints
