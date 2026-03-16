@@ -5,8 +5,10 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/XSAM/otelsql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 //go:embed migrations/*.sql
@@ -20,7 +22,10 @@ type DB struct {
 // New opens a PostgreSQL database at the given DSN and runs migrations.
 // dsn may be a URI (postgres://...) or a key-value DSN (host=... port=...).
 func New(dsn string) (*DB, error) {
-	conn, err := sql.Open("pgx", dsn)
+	conn, err := otelsql.Open("pgx", dsn,
+		otelsql.WithAttributes(semconv.DBSystemPostgreSQL),
+		otelsql.WithSpanOptions(otelsql.SpanOptions{DisableQuery: true}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}

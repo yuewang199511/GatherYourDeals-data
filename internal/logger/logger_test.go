@@ -82,7 +82,7 @@ func TestLogger_WritesToBothStdoutAndFile(t *testing.T) {
 		Prefix:   "test",
 		MaxBytes: 1024,
 		MaxFiles: 2,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("New logger failed: %v", err)
 	}

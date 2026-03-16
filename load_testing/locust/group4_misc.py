@@ -23,9 +23,10 @@ User counts and timing are driven by env vars (see load_testing/.env):
 import sys
 import uuid
 
-from locust import HttpUser, constant_throughput, events
+from locust import constant_throughput, events
 
 from common import (
+    BaseGYDUser,
     configure_context,
     load_config,
     login,
@@ -99,12 +100,14 @@ def _record_token_pool_stats(environment, **kwargs):
     set_context_token_pool_stats(token_pool.stats())
 
 
-class MiscUser(HttpUser):
+class MiscUser(BaseGYDUser):
     """Exercises refresh, logout, and meta endpoints concurrently."""
 
+    _test_group = "misc_lightweight"
     wait_time = constant_throughput(1.0)
 
     def on_start(self):
+        super().on_start()
         cfg = load_config()
         pair = login(cfg["target_url"], cfg["username"], cfg["password"])
         self._access = pair["access"]

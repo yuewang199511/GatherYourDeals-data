@@ -2,12 +2,14 @@
 common.py — Shared infrastructure for all GatherYourDeals load test groups.
 
 Provides:
-  - load_config()          : read all GYD_* env vars
-  - login()                : POST /api/v1/auth/login → {"access": ..., "refresh": ...}
-  - TokenPool              : thread-safe queue of login token pairs (Group 4)
-  - token_pool             : module-level TokenPool singleton
-  - make_shape()           : factory for per-group LoadTestShape subclass
-  - configure_context()    : register event listeners that write _context.json
+  - TEST_RUN_ID             : UUID string unique to this process invocation
+  - load_config()           : read all GYD_* env vars
+  - login()                 : POST /api/v1/auth/login → {"access": ..., "refresh": ...}
+  - BaseGYDUser             : HttpUser subclass that injects X-Test-* headers (FR-006)
+  - TokenPool               : thread-safe queue of login token pairs (Group 4)
+  - token_pool              : module-level TokenPool singleton
+  - make_shape()            : factory for per-group LoadTestShape subclass
+  - configure_context()     : register event listeners that write _context.json
   - set_context_token_pool_stats() : Group 4 hook to add pool stats to context
 """
 
@@ -16,11 +18,19 @@ import os
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from queue import Empty, Queue
 
 import requests
-from locust import events
+from locust import HttpUser, events
+
+
+# ---------------------------------------------------------------------------
+# Run identity — one UUID per Locust process invocation (FR-006)
+# ---------------------------------------------------------------------------
+
+TEST_RUN_ID = str(uuid.uuid4())
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +101,34 @@ def login(base_url, username, password):
         "access": data["access_token"],
         "refresh": data["refresh_token"],
     }
+
+
+# ---------------------------------------------------------------------------
+# BaseGYDUser — injects X-Test-* headers for OTel span correlation (FR-006)
+# ---------------------------------------------------------------------------
+
+class BaseGYDUser(HttpUser):
+    """
+    Base HttpUser that injects X-Test-* correlation headers at session level so
+    every request carries test metadata for OTel span attributes (FR-006, FR-007).
+
+    Subclasses MUST set ``_test_group`` to their group name and call
+    ``super().on_start()`` at the top of their own ``on_start``.
+    """
+
+    abstract = True
+    _test_group = "unknown"
+
+    def on_start(self):
+        cfg = load_config()
+        phase = cfg["phase"]
+        target_rps = cfg["rps_moderate"] if phase == "moderate" else cfg["rps_stress"]
+        self.client.headers.update({
+            "X-Test-Run-Id": TEST_RUN_ID,
+            "X-Test-Group": self._test_group,
+            "X-Test-Phase": phase,
+            "X-Test-Target-Rps": str(target_rps),
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +248,8 @@ _context_data = {}
 def configure_context(group_name, moderate_target_rps, stress_target_rps,
                       moderate_users=0, stress_peak_users=0):
     """
-    Register Locust event listeners that write a _context.json file for each run.
+    Register Locust event listeners that write a _context.json file for each run
+    and optionally send a summary event to Honeycomb (FR-013, FR-014).
 
     Call this once at module level in each group locustfile:
         configure_context("cpu_bound", moderate_target_rps=10, stress_target_rps=30)
@@ -225,6 +264,7 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
         phase = cfg["phase"]
         _context_data.update(
             {
+                "test_run_id": TEST_RUN_ID,
                 "target_url": cfg["target_url"],
                 "platform_name": cfg["platform_name"],
                 "database_type": cfg["db_type"],
@@ -263,6 +303,8 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
             json.dump(output, f, indent=2)
         print(f"\nContext written → {output_path}", file=sys.stderr)
 
+        _send_honeycomb_summary(environment)
+
 
 def set_context_token_pool_stats(stats):
     """
@@ -270,3 +312,59 @@ def set_context_token_pool_stats(stats):
     Call from a test_stop listener in group4_misc.py BEFORE quitting fires.
     """
     _context_data["token_pool_stats"] = stats
+
+
+# ---------------------------------------------------------------------------
+# Honeycomb summary event sender (FR-013, FR-014)
+# ---------------------------------------------------------------------------
+
+def _send_honeycomb_summary(environment):
+    """
+    Send a per-run summary event to the Honeycomb Events API.
+    No-op when HONEYCOMB_API_KEY is unset (FR-014).
+    """
+    api_key = os.environ.get("HONEYCOMB_API_KEY", "")
+    dataset = os.environ.get("HONEYCOMB_DATASET", "gatheryourdeals-load-tests")
+    if not api_key:
+        return
+
+    total = environment.stats.total
+    event_data = {
+        "test.run_id": TEST_RUN_ID,
+        "test.group": _context_data.get("group", "unknown"),
+        "test.phase": _context_data.get("phase", "unknown"),
+        "test.target_rps": _context_data.get("target_rps", 0),
+        "test.duration_seconds": _context_data.get("duration_seconds", 0),
+        "platform.name": _context_data.get("platform_name", "local"),
+        "db.type": _context_data.get("database_type", "sqlite"),
+        "stats.request_count": total.num_requests,
+        "stats.failure_count": total.num_failures,
+        "stats.median_response_ms": total.get_response_time_percentile(0.5),
+        "stats.p95_response_ms": total.get_response_time_percentile(0.95),
+        "stats.p99_response_ms": total.get_response_time_percentile(0.99),
+        "stats.rps": round(total.current_rps, 2),
+    }
+
+    payload = [{"time": datetime.now(timezone.utc).isoformat(), "data": event_data}]
+    try:
+        resp = requests.post(
+            f"https://api.honeycomb.io/1/batch/{dataset}",
+            headers={
+                "X-Honeycomb-Team": api_key,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=10,
+        )
+        if resp.status_code not in (200, 202):
+            print(
+                f"[honeycomb] WARNING: batch API returned {resp.status_code}: {resp.text[:200]}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"[honeycomb] Summary event sent → run_id={TEST_RUN_ID} dataset={dataset}",
+                file=sys.stderr,
+            )
+    except Exception as exc:
+        print(f"[honeycomb] WARNING: could not send summary event: {exc}", file=sys.stderr)

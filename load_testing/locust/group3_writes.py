@@ -22,9 +22,9 @@ User counts and timing are driven by env vars (see load_testing/.env):
 
 import uuid
 
-from locust import HttpUser, constant_throughput, task
+from locust import constant_throughput, task
 
-from common import configure_context, load_config, login, make_shape
+from common import BaseGYDUser, configure_context, load_config, login, make_shape
 
 _cfg = load_config()
 
@@ -49,12 +49,14 @@ _RECEIPT_TEMPLATE = {
 }
 
 
-class WriteUser(HttpUser):
+class WriteUser(BaseGYDUser):
     """Creates a receipt then immediately deletes it — one cycle per task invocation."""
 
+    _test_group = "write_ops"
     wait_time = constant_throughput(1.0)
 
     def on_start(self):
+        super().on_start()
         cfg = load_config()
         pair = login(cfg["target_url"], cfg["username"], cfg["password"])
         self._headers = {
