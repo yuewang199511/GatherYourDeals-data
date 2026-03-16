@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/config"
@@ -16,6 +20,7 @@ import (
 	"github.com/gatheryourdeals/data/internal/repository"
 	"github.com/gatheryourdeals/data/internal/repository/postgres"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
+	"github.com/gatheryourdeals/data/internal/telemetry"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -109,19 +114,29 @@ func serveCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the HTTP server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Signal-aware context: cancelled on SIGTERM or SIGINT (FR-017).
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
+			// Telemetry: noop when OTEL_EXPORTER_OTLP_ENDPOINT is unset (FR-003).
+			otelProv, err := telemetry.Setup(ctx)
+			if err != nil {
+				return fmt.Errorf("init telemetry: %w", err)
+			}
+
 			cfg, r, err := openDatabase()
 			if err != nil {
 				return err
 			}
 			defer func() { _ = r.Close() }()
 
-			// Logging
+			// Logging: OTel log bridge added as second sink when configured (FR-005).
 			appLogger, err := logger.New(logger.Config{
 				Dir:      cfg.Log.Dir,
 				Prefix:   "gatheryourdeals",
 				MaxBytes: int64(cfg.Log.MaxSizeMB) * 1024 * 1024,
 				MaxFiles: 2,
-			})
+			}, otelProv.LoggerProvider())
 			if err != nil {
 				return fmt.Errorf("init logger: %w", err)
 			}
@@ -146,7 +161,6 @@ func serveCmd() *cobra.Command {
 			tokenService := auth.NewTokenService(secret, accessExp, refreshExp, r.RefreshStore)
 
 			// Guard: require admin to exist before serving traffic
-			ctx := context.Background()
 			hasAdmin, err := authService.HasAdmin(ctx)
 			if err != nil {
 				return fmt.Errorf("check admin: %w", err)
@@ -160,11 +174,36 @@ func serveCmd() *cobra.Command {
 			userHandler := handler.NewUserHandler(r.Users)
 			metaHandler := handler.NewMetaHandler(r.Meta)
 			receiptHandler := handler.NewReceiptHandler(r.Receipts)
-			router := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokenService, appLogger.Writer())
+			router := handler.NewRouter(
+				authHandler, userHandler, metaHandler, receiptHandler,
+				tokenService, appLogger.Writer(), otelProv.TracerProvider(),
+			)
 
 			addr := fmt.Sprintf(":%s", cfg.Server.Port)
 			slog.Info("server starting", "addr", addr)
-			return router.Run(addr)
+
+			// Run server in a goroutine so we can wait for the signal below.
+			srv := &http.Server{Addr: addr, Handler: router}
+			go func() {
+				if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("server error", "error", err)
+				}
+			}()
+
+			// Block until SIGTERM or SIGINT.
+			<-ctx.Done()
+			stop() // release signal capture to allow a second signal to force-kill
+
+			// Graceful shutdown: flush OTel first, then stop accepting requests (FR-017).
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := otelProv.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("otel shutdown error", "error", err)
+			}
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("server shutdown error", "error", err)
+			}
+			return nil
 		},
 	}
 }

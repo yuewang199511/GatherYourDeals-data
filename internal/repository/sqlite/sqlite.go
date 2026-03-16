@@ -5,8 +5,10 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/XSAM/otelsql"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pressly/goose/v3"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 //go:embed migrations/*.sql
@@ -19,7 +21,10 @@ type DB struct {
 
 // New opens a SQLite database at the given path and runs migrations.
 func New(dbPath string) (*DB, error) {
-	conn, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
+	conn, err := otelsql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_foreign_keys=on",
+		otelsql.WithAttributes(semconv.DBSystemSqlite),
+		otelsql.WithSpanOptions(otelsql.SpanOptions{DisableQuery: true}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}

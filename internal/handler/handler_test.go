@@ -50,7 +50,7 @@ func setupEnv(t *testing.T) *testEnv {
 	userHandler := handler.NewUserHandler(userRepo)
 	metaHandler := handler.NewMetaHandler(metaRepo)
 	receiptHandler := handler.NewReceiptHandler(receiptRepo)
-	r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokens, nil)
+	r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokens, nil, nil)
 
 	return &testEnv{
 		router:      r,

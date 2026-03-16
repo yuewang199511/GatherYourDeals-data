@@ -30,5 +30,7 @@ services:
       - GYD_DB_TYPE
       - GYD_PHASE
       - GYD_RESULTS_DIR
+      - HONEYCOMB_API_KEY
+      - HONEYCOMB_DATASET
     # entrypoint / command are supplied by the runner scripts via
     # `docker compose run --rm locust -f locust/... --headless ...`

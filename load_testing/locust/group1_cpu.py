@@ -12,9 +12,9 @@ User counts and timing are driven by env vars (see load_testing/.env):
   GYD_STRESS_HOLD        stress hold in s     (default 90)
 """
 
-from locust import HttpUser, constant_throughput, task
+from locust import constant_throughput, task
 
-from common import configure_context, load_config, make_shape
+from common import BaseGYDUser, configure_context, load_config, make_shape
 
 _cfg = load_config()
 
@@ -30,12 +30,14 @@ configure_context(
 GroupShape = make_shape(endpoint_multiplier=1)
 
 
-class LoginUser(HttpUser):
+class LoginUser(BaseGYDUser):
     """Hammers POST /api/v1/auth/login with bcrypt-hashed credentials."""
 
+    _test_group = "cpu_bound"
     wait_time = constant_throughput(1.0)
 
     def on_start(self):
+        super().on_start()
         cfg = load_config()
         self._username = cfg["username"]
         self._password = cfg["password"]
