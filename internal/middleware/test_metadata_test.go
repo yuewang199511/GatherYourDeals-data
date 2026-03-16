@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/gatheryourdeals/data/internal/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 func init() {
@@ -31,10 +31,10 @@ func TestTestMetadata_PassesThrough(t *testing.T) {
 		{
 			name: "all four test headers",
 			headers: map[string]string{
-				"X-Test-Run-Id":      "run-001",
-				"X-Test-Group":       "cpu_bound",
-				"X-Test-Phase":       "moderate",
-				"X-Test-Target-Rps":  "100",
+				"X-Test-Run-Id":     "run-001",
+				"X-Test-Group":      "cpu_bound",
+				"X-Test-Phase":      "moderate",
+				"X-Test-Target-Rps": "100",
 			},
 		},
 		{

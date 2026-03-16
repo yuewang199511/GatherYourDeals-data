@@ -82,6 +82,18 @@ log:
 | Local | `./logs/` |
 | Docker | `./data/logs/` (mounted from container's `/data/logs/`) |
 
+## Development
+
+### Fixing lint/formatting issues
+
+```bash
+goimports -w ./...
+```
+
+This fixes both import ordering and general formatting. Run it before committing if `golangci-lint` reports `goimports` errors.
+
+**Prerequisites:** `go install golang.org/x/tools/cmd/goimports@latest`
+
 ## Documentation
 
 | Document | Description |

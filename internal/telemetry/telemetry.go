@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	defaultServiceName    = "gatheryourdeals"
-	shutdownTimeout       = 10 * time.Second
+	defaultServiceName = "gatheryourdeals"
+	shutdownTimeout    = 10 * time.Second
 )
 
 // Provider holds the OTel SDK providers and manages their lifecycle.
