@@ -38,7 +38,7 @@ err()  { echo "[run_group] ERROR: $*" >&2; }
 usage() {
     echo "Usage: cd load_testing && ./run_group.sh <GROUP> [PHASE]"
     echo ""
-    echo "  GROUP  : 1 | 2 | 3 | 4"
+    echo "  GROUP  : 1 | 2 | 3 | 4 | 5"
     echo "  PHASE  : moderate | stress | all  (default: all)"
     echo ""
     echo "Required env vars: GYD_TEST_USERNAME, GYD_TEST_PASSWORD"
@@ -106,8 +106,9 @@ case "$GROUP" in
     2) LOCUST_FILE="group2_reads.py";  GROUP_LABEL="group2_reads" ;;
     3) LOCUST_FILE="group3_writes.py"; GROUP_LABEL="group3_writes" ;;
     4) LOCUST_FILE="group4_misc.py";   GROUP_LABEL="group4_misc" ;;
+    5) LOCUST_FILE="group5_logout.py"; GROUP_LABEL="group5_logout" ;;
     *)
-        err "Invalid GROUP '${GROUP}'. Must be 1, 2, 3, or 4."
+        err "Invalid GROUP '${GROUP}'. Must be 1, 2, 3, 4, or 5."
         usage
         ;;
 esac

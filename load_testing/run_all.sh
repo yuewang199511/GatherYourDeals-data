@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # run_all.sh — Run the full GatherYourDeals load test suite.
 #
-# Runs all 4 groups sequentially. Each group runs Moderate phase first,
+# Runs all 5 groups sequentially. Each group runs Moderate phase first,
 # then Stress phase (skipped if Moderate error rate >= 5%).
 #
-# Total runtime: ~18 minutes against a responsive target.
+# Total runtime: ~22.5 minutes against a responsive target.
 #
 # Usage:
 #   cd load_testing
@@ -137,6 +137,7 @@ declare -a LOCUST_GROUPS=(
     "group2_reads.py|group2_reads"
     "group3_writes.py|group3_writes"
     "group4_misc.py|group4_misc"
+    "group5_logout.py|group5_logout"
 )
 
 # ── Run all groups ────────────────────────────────────────────────────────────
