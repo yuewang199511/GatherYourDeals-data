@@ -14,6 +14,10 @@ type MetaFieldRepository interface {
 	// GetField returns a single field by name.
 	GetField(ctx context.Context, fieldName string) (*model.MetaField, error)
 
+	// GetFieldsBatch returns all fields whose names are in fieldNames.
+	// Missing names are simply absent from the result (no error).
+	GetFieldsBatch(ctx context.Context, fieldNames []string) ([]*model.MetaField, error)
+
 	// ListFields returns a paginated list of registered fields (native + user-defined).
 	ListFields(ctx context.Context, params model.PaginationParams) (*model.Page[*model.MetaField], error)
 

@@ -65,7 +65,6 @@ func (h *MetaHandler) CreateField(c *gin.Context) {
 	}
 
 	if err := h.meta.CreateField(c.Request.Context(), field); err != nil {
-		// SQLite returns a UNIQUE constraint error for duplicates.
 		c.JSON(http.StatusConflict, gin.H{"error": "field already exists"})
 		return
 	}
@@ -76,10 +75,6 @@ func (h *MetaHandler) CreateField(c *gin.Context) {
 // UpdateDescription handles PUT /api/v1/meta/:fieldName
 // Updates the description of an existing field. Admin only.
 func (h *MetaHandler) UpdateDescription(c *gin.Context) {
-	if !requireAdmin(c) {
-		return
-	}
-
 	fieldName := c.Param("fieldName")
 
 	var req updateDescriptionRequest

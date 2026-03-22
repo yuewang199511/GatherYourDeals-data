@@ -70,14 +70,18 @@ func NewRouter(
 		protected.POST("/auth/logout", authHandler.Logout)
 		protected.GET("/auth/me", authHandler.Me)
 
-		// Users (admin-only checks inside handler)
-		protected.GET("/users", userHandler.ListUsers)
-		protected.DELETE("/users/:id", userHandler.DeleteUser)
-
-		// Meta (update description has admin check inside handler)
+		// Meta (read + create open to all authenticated users)
 		protected.GET("/meta", metaHandler.ListFields)
 		protected.POST("/meta", metaHandler.CreateField)
-		protected.PUT("/meta/:fieldName", metaHandler.UpdateDescription)
+
+		// Admin-only routes
+		admin := protected.Group("")
+		admin.Use(middleware.RequireAdmin())
+		{
+			admin.GET("/users", userHandler.ListUsers)
+			admin.DELETE("/users/:id", userHandler.DeleteUser)
+			admin.PUT("/meta/:fieldName", metaHandler.UpdateDescription)
+		}
 
 		// Receipts
 		protected.POST("/receipts", receiptHandler.CreateReceipt)

@@ -2,25 +2,21 @@
 common.py — Shared infrastructure for all GatherYourDeals load test groups.
 
 Provides:
-  - TEST_RUN_ID             : UUID string unique to this process invocation
-  - load_config()           : read all GYD_* env vars
-  - login()                 : POST /api/v1/auth/login → {"access": ..., "refresh": ...}
-  - BaseGYDUser             : HttpUser subclass that injects X-Test-* headers (FR-006)
-  - TokenPool               : thread-safe queue of login token pairs (Group 4)
-  - token_pool              : module-level TokenPool singleton
-  - make_shape()            : factory for per-group LoadTestShape subclass
-  - configure_context()     : register event listeners that write _context.json
-  - set_context_token_pool_stats() : Group 4 hook to add pool stats to context
+  - TEST_RUN_ID       : UUID string unique to this process invocation
+  - load_config()     : read all GYD_* env vars
+  - login()           : POST /api/v1/auth/login → {"access": ..., "refresh": ...}
+  - safe_login()      : login() that aborts the test run on failure
+  - BaseGYDUser       : HttpUser subclass that injects X-Test-* headers (FR-006)
+  - make_shape()      : factory for per-group LoadTestShape subclass
+  - configure_context(): register event listeners that write _context.json
 """
 
 import json
 import os
 import sys
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from queue import Empty, Queue
 
 import requests
 from locust import HttpUser, events
@@ -59,6 +55,8 @@ def load_config():
         "target_url": target_url,
         "username": os.environ.get("GYD_TEST_USERNAME", ""),
         "password": os.environ.get("GYD_TEST_PASSWORD", ""),
+        "admin_username": os.environ.get("GYD_ADMIN_USERNAME", ""),
+        "admin_password": os.environ.get("GYD_ADMIN_PASSWORD", ""),
         "platform_name": os.environ.get("GYD_PLATFORM_NAME", "local"),
         "db_type": os.environ.get("GYD_DB_TYPE", "sqlite"),
         "phase": phase,
@@ -69,15 +67,9 @@ def load_config():
         "ramp_time":           int(os.environ.get("GYD_RAMP_TIME",           "60")),
         "moderate_duration":   int(os.environ.get("GYD_MODERATE_DURATION",   "120")),
         "stress_hold":         int(os.environ.get("GYD_STRESS_HOLD",         "90")),
-        # Load profile tuning — Group 4/5 fixed-rate endpoints
-        "logout_rps_moderate": int(os.environ.get("GYD_LOGOUT_RPS_MODERATE", "10")),
-        "logout_rps_stress":   int(os.environ.get("GYD_LOGOUT_RPS_STRESS",   "40")),
+        # Load profile tuning — Group 4 fixed-rate endpoints
         "meta_rps_moderate":   int(os.environ.get("GYD_META_RPS_MODERATE",   "5")),
         "meta_rps_stress":     int(os.environ.get("GYD_META_RPS_STRESS",     "20")),
-        # Token pool fill tuning — Group 5
-        "token_pool_workers":  int(os.environ.get("GYD_TOKEN_POOL_WORKERS",  "300")),
-        "setup_time":          int(os.environ.get("GYD_SETUP_TIME",          "30")),
-        "token_pool_headroom": float(os.environ.get("GYD_TOKEN_POOL_HEADROOM", "1.17")),
     }
 
 
@@ -111,6 +103,20 @@ def login(base_url, username, password):
 # BaseGYDUser — injects X-Test-* headers for OTel span correlation (FR-006)
 # ---------------------------------------------------------------------------
 
+def safe_login(environment, base_url, username, password):
+    """
+    Call login() and abort the entire test run on failure.
+    Locust silently swallows on_start() exceptions, so login failures would
+    produce 0 requests with no visible error. This surfaces them immediately.
+    """
+    try:
+        return login(base_url, username, password)
+    except Exception as exc:
+        print(f"\n[FATAL] Login failed for '{username}': {exc}", file=sys.stderr)
+        environment.runner.quit()
+        raise
+
+
 class BaseGYDUser(HttpUser):
     """
     Base HttpUser that injects X-Test-* correlation headers at session level so
@@ -133,61 +139,6 @@ class BaseGYDUser(HttpUser):
             "X-Test-Phase": phase,
             "X-Test-Target-Rps": str(target_rps),
         })
-
-
-# ---------------------------------------------------------------------------
-# Token pool (Group 4 only)
-# ---------------------------------------------------------------------------
-
-class TokenPool:
-    """Thread-safe FIFO pool of {"access": ..., "refresh": ...} token pairs."""
-
-    def __init__(self):
-        self._queue = Queue()
-        self._lock = threading.Lock()
-        self._generated = 0
-        self._consumed = 0
-
-    def put(self, token_pair):
-        self._queue.put(token_pair)
-        with self._lock:
-            self._generated += 1
-
-    def get(self):
-        """Return a token pair dict, or None if the pool is empty."""
-        try:
-            pair = self._queue.get_nowait()
-            with self._lock:
-                self._consumed += 1
-            return pair
-        except Empty:
-            return None
-
-    def size(self):
-        return self._queue.qsize()
-
-    def record_fill_metadata(self, targeted: int, fill_time_s: float):
-        """Record fill-phase metadata so stats() can report shortfall and timing."""
-        with self._lock:
-            self._targeted = targeted
-            self._fill_time_s = fill_time_s
-
-    def stats(self):
-        with self._lock:
-            targeted = getattr(self, "_targeted", self._generated)
-            fill_time_s = getattr(self, "_fill_time_s", 0.0)
-            return {
-                "pre_generated": self._generated,
-                "targeted": targeted,
-                "shortfall": max(0, targeted - self._generated),
-                "fill_time_s": round(fill_time_s, 2),
-                "consumed": self._consumed,
-                "remaining": self._queue.qsize(),
-            }
-
-
-# Module-level singleton — imported by group4_misc.py
-token_pool = TokenPool()
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +220,7 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
     Call this once at module level in each group locustfile:
         configure_context("cpu_bound", moderate_target_rps=10, stress_target_rps=30)
 
-    The file is written on the 'quitting' event (after all test_stop listeners),
-    so Group 4 can update token_pool_stats before the file is flushed.
+    The file is written on the 'quitting' event (after all test_stop listeners).
     """
 
     @events.test_start.add_listener
@@ -292,7 +242,6 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
                 if phase == "moderate"
                 else stress_peak_users,
                 "test_start": datetime.now(timezone.utc).isoformat(),
-                "token_pool_stats": None,
                 # internal — stripped before writing
                 "_start_ts": time.monotonic(),
                 "_results_dir": cfg["results_dir"],
@@ -319,14 +268,6 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
         print(f"\nContext written → {output_path}", file=sys.stderr)
 
         _send_honeycomb_summary(environment)
-
-
-def set_context_token_pool_stats(stats):
-    """
-    Override token_pool_stats in the pending context output.
-    Call from a test_stop listener in group4_misc.py BEFORE quitting fires.
-    """
-    _context_data["token_pool_stats"] = stats
 
 
 # ---------------------------------------------------------------------------

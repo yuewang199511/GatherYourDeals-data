@@ -44,5 +44,4 @@ gatheryourdeals
 # LLM settings
 .claude/
 .specify/
-CLAUDE.md
 specs/

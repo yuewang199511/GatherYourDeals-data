@@ -20,7 +20,7 @@ import uuid
 
 from locust import constant_throughput
 
-from common import BaseGYDUser, configure_context, load_config, login, make_shape
+from common import BaseGYDUser, configure_context, load_config, make_shape, safe_login
 
 _cfg = load_config()
 
@@ -52,10 +52,13 @@ class MiscUser(BaseGYDUser):
     def on_start(self):
         super().on_start()
         cfg = load_config()
-        pair = login(cfg["target_url"], cfg["username"], cfg["password"])
+        pair = safe_login(self.environment, cfg["target_url"], cfg["username"], cfg["password"])
         self._access = pair["access"]
         self._refresh = pair["refresh"]
         self._headers = {"Authorization": f"Bearer {self._access}"}
+
+        admin_pair = safe_login(self.environment, cfg["target_url"], cfg["admin_username"], cfg["admin_password"])
+        self._admin_headers = {"Authorization": f"Bearer {admin_pair['access']}"}
 
         # Create a unique meta field for this user's PUT tests
         self._meta_field = f"{_META_FIELD_PREFIX}_{uuid.uuid4().hex[:8]}"
@@ -66,7 +69,7 @@ class MiscUser(BaseGYDUser):
                 "description": "load test field",
                 "type": "string",
             },
-            headers=self._headers,
+            headers=self._admin_headers,
             name="/api/v1/meta [setup]",
         )
 
@@ -97,7 +100,7 @@ class MiscUser(BaseGYDUser):
                 "description": "load test field",
                 "type": "string",
             },
-            headers=self._headers,
+            headers=self._admin_headers,
             name="/api/v1/meta [POST]",
         )
 
@@ -106,7 +109,7 @@ class MiscUser(BaseGYDUser):
         self.client.put(
             f"/api/v1/meta/{self._meta_field}",
             json={"description": f"updated at {uuid.uuid4().hex[:4]}"},
-            headers=self._headers,
+            headers=self._admin_headers,
             name="/api/v1/meta/:fieldName [PUT]",
         )
 

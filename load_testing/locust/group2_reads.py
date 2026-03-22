@@ -19,7 +19,7 @@ import requests as _requests
 from locust import constant_throughput, events, task
 from locust.contrib.fasthttp import FastHttpUser
 
-from common import TEST_RUN_ID, configure_context, load_config, login, make_shape
+from common import TEST_RUN_ID, configure_context, load_config, login, make_shape, safe_login
 
 _cfg = load_config()
 _ENDPOINTS = 4
@@ -71,7 +71,7 @@ class ReadUser(FastHttpUser):
         cfg = load_config()
         phase = cfg["phase"]
         target_rps = cfg["rps_moderate"] if phase == "moderate" else cfg["rps_stress"]
-        pair = login(cfg["target_url"], cfg["username"], cfg["password"])
+        pair = safe_login(self.environment, cfg["target_url"], cfg["username"], cfg["password"])
         self._headers = {
             "Authorization": f"Bearer {pair['access']}",
             "X-Test-Run-Id": TEST_RUN_ID,

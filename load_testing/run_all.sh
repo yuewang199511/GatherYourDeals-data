@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_all.sh — Run the full GatherYourDeals load test suite.
 #
-# Runs all 5 groups sequentially. Each group runs Moderate phase first,
+# Runs all 4 groups sequentially. Each group runs Moderate phase first,
 # then Stress phase (skipped if Moderate error rate >= 5%).
 #
 # Total runtime: ~22.5 minutes against a responsive target.
@@ -81,15 +81,28 @@ run_phase() {
 
     log "Starting ${group_label} / ${phase} …"
 
-    GYD_PHASE="$phase" GYD_RESULTS_DIR="results/${RUN_TIMESTAMP}" docker compose run --rm locust \
-        -f "locust/${locust_file}" \
-        --headless \
-        --host "${GYD_TARGET_URL:-http://localhost:8080}" \
-        --csv  "$csv_prefix" \
-        --html "$html_file" \
-        --stop-timeout 10
+    # Start 4 workers in the background; they wait for the master to connect.
+    LOCUST_FILE="$locust_file" GYD_PHASE="$phase" \
+        docker compose up -d --scale locust-worker=4 --no-recreate locust-worker
+
+    # Run the master (blocks until the test completes).
+    GYD_PHASE="$phase" GYD_RESULTS_DIR="results/${RUN_TIMESTAMP}" \
+        docker compose run --rm locust-master \
+            -f "locust/${locust_file}" \
+            --master \
+            --expect-workers 4 \
+            --headless \
+            --host "${GYD_TARGET_URL:-http://localhost:8080}" \
+            --csv  "$csv_prefix" \
+            --html "$html_file" \
+            --stop-timeout 10
 
     local exit_code=$?
+
+    # Always stop and remove workers after each phase.
+    docker compose stop locust-worker
+    docker compose rm -f locust-worker
+
     if [ "$exit_code" -ne 0 ]; then
         err "Locust exited with code ${exit_code} for ${group_label}/${phase}"
         return 2
@@ -137,7 +150,6 @@ declare -a LOCUST_GROUPS=(
     "group2_reads.py|group2_reads"
     "group3_writes.py|group3_writes"
     "group4_misc.py|group4_misc"
-    "group5_logout.py|group5_logout"
 )
 
 # ── Run all groups ────────────────────────────────────────────────────────────

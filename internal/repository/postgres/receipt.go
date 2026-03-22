@@ -30,18 +30,21 @@ func (r *ReceiptRepo) CreateReceipt(ctx context.Context, receipt *model.Receipt)
 		return err
 	}
 
-	extrasJSON, err := json.Marshal(receipt.Extras)
-	if err != nil {
-		return fmt.Errorf("marshal extras: %w", err)
-	}
+	var extrasJSON []byte
 	if receipt.Extras == nil {
 		extrasJSON = []byte("{}")
+	} else {
+		var merr error
+		extrasJSON, merr = json.Marshal(receipt.Extras)
+		if merr != nil {
+			return fmt.Errorf("marshal extras: %w", merr)
+		}
 	}
 
 	receipt.UploadTime = time.Now().Unix()
 
 	query := `INSERT INTO receipts (` + receiptColumns + `) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-	_, err = r.db.conn.ExecContext(ctx, query,
+	_, err := r.db.conn.ExecContext(ctx, query,
 		receipt.ID,
 		receipt.ProductName,
 		receipt.PurchaseDate,
@@ -67,32 +70,10 @@ func (r *ReceiptRepo) GetReceiptByID(ctx context.Context, id string) (*model.Rec
 }
 
 func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, params model.PaginationParams) (*model.Page[*model.Receipt], error) {
-	// Count total matching records.
-	var total int
-	if err := r.db.conn.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM receipts WHERE user_id = $1`, userID,
-	).Scan(&total); err != nil {
-		return nil, fmt.Errorf("count receipts: %w", err)
-	}
-
-	page := &model.Page[*model.Receipt]{
-		Data:   []*model.Receipt{},
-		Total:  total,
-		Offset: params.Offset,
-		Limit:  params.Limit,
-	}
-	if total > 0 {
-		page.TotalPages = (total + params.Limit - 1) / params.Limit
-	}
-
-	if total == 0 || params.Offset >= total {
-		page.Data = []*model.Receipt{}
-		return page, nil
-	}
-
-	// Fetch paginated data. SortBy and SortOrder are validated by the handler.
+	// Single query: window function returns total alongside each row.
+	// SortBy and SortOrder are validated by the handler.
 	query := fmt.Sprintf(
-		`SELECT `+receiptColumns+` FROM receipts WHERE user_id = $1 ORDER BY %s %s LIMIT $2 OFFSET $3`,
+		`SELECT `+receiptColumns+`, COUNT(*) OVER() FROM receipts WHERE user_id = $1 ORDER BY %s %s LIMIT $2 OFFSET $3`,
 		params.SortBy, params.SortOrder,
 	)
 	rows, err := r.db.conn.QueryContext(ctx, query, userID, params.Limit, params.Offset)
@@ -102,46 +83,89 @@ func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, par
 	defer func() { _ = rows.Close() }()
 
 	var receipts []*model.Receipt
+	var total int
 	for rows.Next() {
-		rec, err := r.scanReceiptRow(rows)
-		if err != nil {
-			return nil, err
+		var rec model.Receipt
+		var extrasStr string
+		if err := rows.Scan(
+			&rec.ID, &rec.ProductName, &rec.PurchaseDate,
+			&rec.Price, &rec.Amount, &rec.StoreName,
+			&rec.Latitude, &rec.Longitude, &extrasStr,
+			&rec.UploadTime, &rec.UserID, &total,
+		); err != nil {
+			return nil, fmt.Errorf("scan receipt row: %w", err)
 		}
-		receipts = append(receipts, rec)
+		if err := json.Unmarshal([]byte(extrasStr), &rec.Extras); err != nil {
+			return nil, fmt.Errorf("unmarshal extras: %w", err)
+		}
+		receipts = append(receipts, &rec)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if receipts == nil {
-		receipts = []*model.Receipt{}
+	if len(receipts) == 0 && params.Offset > 0 {
+		if err := r.db.conn.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM receipts WHERE user_id = $1`, userID,
+		).Scan(&total); err != nil {
+			return nil, fmt.Errorf("count receipts: %w", err)
+		}
 	}
-	page.Data = receipts
+
+	page := &model.Page[*model.Receipt]{
+		Data:   receipts,
+		Total:  total,
+		Offset: params.Offset,
+		Limit:  params.Limit,
+	}
+	if total > 0 {
+		page.TotalPages = (total + params.Limit - 1) / params.Limit
+	}
+	if page.Data == nil {
+		page.Data = []*model.Receipt{}
+	}
 	return page, nil
 }
 
 func (r *ReceiptRepo) DeleteReceipt(ctx context.Context, id string) error {
-	_, err := r.db.conn.ExecContext(ctx, `DELETE FROM receipts WHERE id = $1`, id)
+	result, err := r.db.conn.ExecContext(ctx, `DELETE FROM receipts WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete receipt: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete receipt rows affected: %w", err)
+	}
+	if n == 0 {
+		return model.ErrNotFound
 	}
 	return nil
 }
 
 // validateExtras checks that every key in the extras map is registered in the meta table.
+// Uses a single batch query instead of one query per key.
 func (r *ReceiptRepo) validateExtras(ctx context.Context, extras map[string]interface{}) error {
 	if len(extras) == 0 {
 		return nil
 	}
-	for key := range extras {
-		field, err := r.meta.GetField(ctx, key)
-		if err != nil {
-			return fmt.Errorf("validate extras: %w", err)
-		}
-		if field == nil {
+	keys := make([]string, 0, len(extras))
+	for k := range extras {
+		keys = append(keys, k)
+	}
+	fields, err := r.meta.GetFieldsBatch(ctx, keys)
+	if err != nil {
+		return fmt.Errorf("validate extras: %w", err)
+	}
+	found := make(map[string]*model.MetaField, len(fields))
+	for _, f := range fields {
+		found[f.FieldName] = f
+	}
+	for _, key := range keys {
+		f, ok := found[key]
+		if !ok {
 			slog.Warn("receipt rejected: unregistered field in extras", "field", key)
 			return fmt.Errorf("%w: %q", model.ErrFieldNotRegistered, key)
 		}
-		if field.Native {
+		if f.Native {
 			slog.Warn("receipt rejected: native field used in extras", "field", key)
 			return fmt.Errorf("%w: %q is a native field and cannot be used in extras", model.ErrFieldNotRegistered, key)
 		}
@@ -164,25 +188,6 @@ func (r *ReceiptRepo) scanReceipt(row *sql.Row) (*model.Receipt, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan receipt: %w", err)
-	}
-	if err := json.Unmarshal([]byte(extrasStr), &rec.Extras); err != nil {
-		return nil, fmt.Errorf("unmarshal extras: %w", err)
-	}
-	return &rec, nil
-}
-
-// scanReceiptRow scans a single receipt from a multi-row result set.
-func (r *ReceiptRepo) scanReceiptRow(rows *sql.Rows) (*model.Receipt, error) {
-	var rec model.Receipt
-	var extrasStr string
-	err := rows.Scan(
-		&rec.ID, &rec.ProductName, &rec.PurchaseDate,
-		&rec.Price, &rec.Amount, &rec.StoreName,
-		&rec.Latitude, &rec.Longitude, &extrasStr,
-		&rec.UploadTime, &rec.UserID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("scan receipt row: %w", err)
 	}
 	if err := json.Unmarshal([]byte(extrasStr), &rec.Extras); err != nil {
 		return nil, fmt.Errorf("unmarshal extras: %w", err)

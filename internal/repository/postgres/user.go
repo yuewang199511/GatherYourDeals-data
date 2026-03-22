@@ -52,30 +52,10 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, id string, passwordHash s
 }
 
 func (r *UserRepo) ListUsers(ctx context.Context, params model.PaginationParams) (*model.Page[*model.User], error) {
-	// Count total users.
-	var total int
-	if err := r.db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
-		return nil, fmt.Errorf("count users: %w", err)
-	}
-
-	page := &model.Page[*model.User]{
-		Data:   []*model.User{},
-		Total:  total,
-		Offset: params.Offset,
-		Limit:  params.Limit,
-	}
-	if total > 0 {
-		page.TotalPages = (total + params.Limit - 1) / params.Limit
-	}
-
-	if total == 0 || params.Offset >= total {
-		page.Data = []*model.User{}
-		return page, nil
-	}
-
-	// Fetch paginated data. SortBy and SortOrder are validated by the handler.
+	// Single query: window function returns total alongside each row.
+	// SortBy and SortOrder are validated by the handler.
 	query := fmt.Sprintf(
-		`SELECT `+userColumns+` FROM users ORDER BY %s %s LIMIT $1 OFFSET $2`,
+		`SELECT `+userColumns+`, COUNT(*) OVER() FROM users ORDER BY %s %s LIMIT $1 OFFSET $2`,
 		params.SortBy, params.SortOrder,
 	)
 	rows, err := r.db.conn.QueryContext(ctx, query, params.Limit, params.Offset)
@@ -85,27 +65,53 @@ func (r *UserRepo) ListUsers(ctx context.Context, params model.PaginationParams)
 	defer func() { _ = rows.Close() }()
 
 	var users []*model.User
+	var total int
 	for rows.Next() {
-		u, err := scanRow(rows)
-		if err != nil {
-			return nil, err
+		var u model.User
+		var role string
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &role, &u.CreatedAt, &u.UpdatedAt, &total); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
 		}
-		users = append(users, u)
+		u.Role = model.Role(role)
+		users = append(users, &u)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if users == nil {
-		users = []*model.User{}
+	// If no rows returned with a non-zero offset, the offset is past the end;
+	// run a separate count to fill in the total for the response envelope.
+	if len(users) == 0 && params.Offset > 0 {
+		if err := r.db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
+			return nil, fmt.Errorf("count users: %w", err)
+		}
 	}
-	page.Data = users
+
+	page := &model.Page[*model.User]{
+		Data:   users,
+		Total:  total,
+		Offset: params.Offset,
+		Limit:  params.Limit,
+	}
+	if total > 0 {
+		page.TotalPages = (total + params.Limit - 1) / params.Limit
+	}
+	if page.Data == nil {
+		page.Data = []*model.User{}
+	}
 	return page, nil
 }
 
 func (r *UserRepo) DeleteUser(ctx context.Context, id string) error {
-	_, err := r.db.conn.ExecContext(ctx, "DELETE FROM users WHERE id = $1", id)
+	result, err := r.db.conn.ExecContext(ctx, "DELETE FROM users WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete user rows affected: %w", err)
+	}
+	if n == 0 {
+		return model.ErrNotFound
 	}
 	return nil
 }
@@ -130,18 +136,6 @@ func (r *UserRepo) scanUser(ctx context.Context, query string, args ...interface
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan user: %w", err)
-	}
-	u.Role = model.Role(role)
-	return &u, nil
-}
-
-// scanRow scans a single row from a multi-row result set.
-func scanRow(rows *sql.Rows) (*model.User, error) {
-	var u model.User
-	var role string
-	err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &role, &u.CreatedAt, &u.UpdatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("scan row: %w", err)
 	}
 	u.Role = model.Role(role)
 	return &u, nil

@@ -38,7 +38,7 @@ err()  { echo "[run_group] ERROR: $*" >&2; }
 usage() {
     echo "Usage: cd load_testing && ./run_group.sh <GROUP> [PHASE]"
     echo ""
-    echo "  GROUP  : 1 | 2 | 3 | 4 | 5"
+    echo "  GROUP  : 1 | 2 | 3 | 4"
     echo "  PHASE  : moderate | stress | all  (default: all)"
     echo ""
     echo "Required env vars: GYD_TEST_USERNAME, GYD_TEST_PASSWORD"
@@ -75,15 +75,28 @@ run_phase() {
 
     log "Starting ${group_label} / ${phase} …"
 
-    GYD_PHASE="$phase" GYD_RESULTS_DIR="results/${RUN_TIMESTAMP}" docker compose run --rm locust \
-        -f "locust/${locust_file}" \
-        --headless \
-        --host "${GYD_TARGET_URL:-http://localhost:8080}" \
-        --csv  "$csv_prefix" \
-        --html "$html_file" \
-        --stop-timeout 10
+    # Start 4 workers in the background; they wait for the master to connect.
+    LOCUST_FILE="$locust_file" GYD_PHASE="$phase" \
+        docker compose up -d --scale locust-worker=4 --no-recreate locust-worker
+
+    # Run the master (blocks until the test completes).
+    GYD_PHASE="$phase" GYD_RESULTS_DIR="results/${RUN_TIMESTAMP}" \
+        docker compose run --rm locust-master \
+            -f "locust/${locust_file}" \
+            --master \
+            --expect-workers 4 \
+            --headless \
+            --host "${GYD_TARGET_URL:-http://localhost:8080}" \
+            --csv  "$csv_prefix" \
+            --html "$html_file" \
+            --stop-timeout 10
 
     local exit_code=$?
+
+    # Always stop and remove workers after each phase.
+    docker compose stop locust-worker
+    docker compose rm -f locust-worker
+
     if [ "$exit_code" -ne 0 ]; then
         err "Locust exited with code ${exit_code} for ${group_label}/${phase}"
         return 2
@@ -106,9 +119,8 @@ case "$GROUP" in
     2) LOCUST_FILE="group2_reads.py";  GROUP_LABEL="group2_reads" ;;
     3) LOCUST_FILE="group3_writes.py"; GROUP_LABEL="group3_writes" ;;
     4) LOCUST_FILE="group4_misc.py";   GROUP_LABEL="group4_misc" ;;
-    5) LOCUST_FILE="group5_logout.py"; GROUP_LABEL="group5_logout" ;;
     *)
-        err "Invalid GROUP '${GROUP}'. Must be 1, 2, 3, 4, or 5."
+        err "Invalid GROUP '${GROUP}'. Must be 1, 2, 3, or 4."
         usage
         ;;
 esac

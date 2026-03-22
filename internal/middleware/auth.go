@@ -16,7 +16,6 @@ const (
 
 // Auth validates the Bearer access token using the TokenService.
 // On success it sets userID and userRole in the gin context.
-// No DB call needed — the role is embedded in the JWT claims.
 func Auth(tokens *auth.TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
