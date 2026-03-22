@@ -11,8 +11,8 @@ For each group, run two phases:
 1. **Moderate (baseline):** Fixed RPS for 2 minutes to capture stable performance
 2. **Stress (find ceiling):** Ramp up over 1 minute, hold for 1.5 minutes. Find where P99 degrades or errors appear
 
-**Time per group:** ~4.5 min (2 min moderate + 2.5 min stress)  
-**Total test time:** ~18 min for all 4 groups per platform
+**Time per group:** ~4.5 min (2 min moderate + 2.5 min stress)
+**Total test time:** ~22.5 min for all 5 groups per platform
 
 ---
 
@@ -90,52 +90,56 @@ Each cycle = 2 write operations, so cycle RPS is set to produce equivalent total
 
 ## Group 4: Lightweight Misc (Concurrent)
 
-Low-resource endpoints with minimal overlap. Run all four simultaneously.
-
-**Note on POST /auth/logout:** Each successful logout invalidates the token. Use a setup phase to pre-generate a pool of tokens (login N times, push tokens into a shared thread-safe queue). Each logout worker consumes one token from the pool. At 40 RPS stress over 2.5 min, pre-generate ~6,000 tokens to avoid exhaustion.
+Low-resource endpoints with minimal overlap. Run all three simultaneously.
 
 ### POST /auth/refresh
 
-| Phase    | Target RPS | Duration | Load Profile                            |
-| -------- | ---------- | -------- | --------------------------------------- |
-| Moderate | 100        | 2 min    | Fixed                                   |
+| Phase    | Target RPS | Duration | Load Profile                                  |
+| -------- | ---------- | -------- | --------------------------------------------- |
+| Moderate | 100        | 2 min    | Fixed                                         |
 | Stress   | 500        | 2.5 min  | Ramp from 100 → 500 over 1 min, hold 1.5 min |
-
-### POST /auth/logout
-
-Kept lower — each logout consumes a pre-generated token from the pool (7,000 tokens pre-filled).
-
-| Phase    | Target RPS | Duration | Load Profile                            |
-| -------- | ---------- | -------- | --------------------------------------- |
-| Moderate | 10         | 2 min    | Fixed                                   |
-| Stress   | 40         | 2.5 min  | Ramp from 10 → 40 over 1 min, hold 1.5 min |
 
 ### POST /meta
 
 Kept lower — creates unique field names; high RPS would exhaust the namespace.
 
-| Phase    | Target RPS | Duration | Load Profile                            |
-| -------- | ---------- | -------- | --------------------------------------- |
-| Moderate | 5          | 2 min    | Fixed                                   |
-| Stress   | 20         | 2.5 min  | Ramp from 5 → 20 over 1 min, hold 1.5 min |
+| Phase    | Target RPS | Duration | Load Profile                                |
+| -------- | ---------- | -------- | ------------------------------------------- |
+| Moderate | 5          | 2 min    | Fixed                                       |
+| Stress   | 20         | 2.5 min  | Ramp from 5 → 20 over 1 min, hold 1.5 min  |
 
 ### PUT /meta/:fieldName
 
-| Phase    | Target RPS | Duration | Load Profile                            |
-| -------- | ---------- | -------- | --------------------------------------- |
-| Moderate | 5          | 2 min    | Fixed                                   |
-| Stress   | 20         | 2.5 min  | Ramp from 5 → 20 over 1 min, hold 1.5 min |
+| Phase    | Target RPS | Duration | Load Profile                                |
+| -------- | ---------- | -------- | ------------------------------------------- |
+| Moderate | 5          | 2 min    | Fixed                                       |
+| Stress   | 20         | 2.5 min  | Ramp from 5 → 20 over 1 min, hold 1.5 min  |
 
-**Combined moderate RPS:** 120 (refresh 100 + logout 10 + meta ×2 5+5)
-**Combined stress RPS:** 580
+**Combined moderate RPS:** 110 (refresh 100 + meta ×2 5+5)
+**Combined stress RPS:** 540 (refresh 500 + meta ×2 20+20)
+
+---
+
+## Group 5: Logout (Token-Pool Driven)
+
+Each virtual user consumes one pre-generated token pair and issues a single `POST /auth/logout`. The pool is filled concurrently at startup (default 300 workers, 30 s budget) to avoid blocking the test window.
+
+**Note on token pool:** At 40 RPS stress over 2.5 min, the pool pre-generates ~7,000 tokens. If the fill completes with fewer tokens than targeted, a shortfall warning is printed to stderr, recorded in Locust stats, and written to `context.json`.
+
+### POST /auth/logout
+
+| Phase    | Target RPS | Duration | Load Profile                                 |
+| -------- | ---------- | -------- | -------------------------------------------- |
+| Moderate | 10         | 2 min    | Fixed                                        |
+| Stress   | 40         | 2.5 min  | Ramp from 10 → 40 over 1 min, hold 1.5 min  |
 
 ---
 
 ## Time Estimates Per Platform
 
-| Scope              | Groups | Time per group | Total    |
-| ------------------ | ------ | -------------- | -------- |
-| All groups         | 4      | ~4.5 min       | ~18 min  |
+| Scope              | Groups | Time per group | Total      |
+| ------------------ | ------ | -------------- | ---------- |
+| All groups         | 5      | ~4.5 min       | ~22.5 min  |
 
 ---
 

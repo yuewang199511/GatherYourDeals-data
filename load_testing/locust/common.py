@@ -69,11 +69,15 @@ def load_config():
         "ramp_time":           int(os.environ.get("GYD_RAMP_TIME",           "60")),
         "moderate_duration":   int(os.environ.get("GYD_MODERATE_DURATION",   "120")),
         "stress_hold":         int(os.environ.get("GYD_STRESS_HOLD",         "90")),
-        # Load profile tuning — Group 4 fixed-rate endpoints
+        # Load profile tuning — Group 4/5 fixed-rate endpoints
         "logout_rps_moderate": int(os.environ.get("GYD_LOGOUT_RPS_MODERATE", "10")),
         "logout_rps_stress":   int(os.environ.get("GYD_LOGOUT_RPS_STRESS",   "40")),
         "meta_rps_moderate":   int(os.environ.get("GYD_META_RPS_MODERATE",   "5")),
         "meta_rps_stress":     int(os.environ.get("GYD_META_RPS_STRESS",     "20")),
+        # Token pool fill tuning — Group 5
+        "token_pool_workers":  int(os.environ.get("GYD_TOKEN_POOL_WORKERS",  "300")),
+        "setup_time":          int(os.environ.get("GYD_SETUP_TIME",          "30")),
+        "token_pool_headroom": float(os.environ.get("GYD_TOKEN_POOL_HEADROOM", "1.17")),
     }
 
 
@@ -162,10 +166,21 @@ class TokenPool:
     def size(self):
         return self._queue.qsize()
 
+    def record_fill_metadata(self, targeted: int, fill_time_s: float):
+        """Record fill-phase metadata so stats() can report shortfall and timing."""
+        with self._lock:
+            self._targeted = targeted
+            self._fill_time_s = fill_time_s
+
     def stats(self):
         with self._lock:
+            targeted = getattr(self, "_targeted", self._generated)
+            fill_time_s = getattr(self, "_fill_time_s", 0.0)
             return {
                 "pre_generated": self._generated,
+                "targeted": targeted,
+                "shortfall": max(0, targeted - self._generated),
+                "fill_time_s": round(fill_time_s, 2),
                 "consumed": self._consumed,
                 "remaining": self._queue.qsize(),
             }
