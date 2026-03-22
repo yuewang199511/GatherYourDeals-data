@@ -52,6 +52,9 @@ openssl rand -hex 32
 
 docker compose run --rm app init    # create database and admin account
 docker compose up --build           # start the server on :8080
+
+# When done, stop and remove containers (prevents auto-restart on next reboot):
+docker compose down
 ```
 
 Logs are written to stdout (visible via `docker compose logs`) and to rotating files persisted in `./data/logs/` on the host.
