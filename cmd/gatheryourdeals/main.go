@@ -194,13 +194,18 @@ func serveCmd() *cobra.Command {
 			<-ctx.Done()
 			stop() // release signal capture to allow a second signal to force-kill
 
-			// Graceful shutdown: flush OTel first, then stop accepting requests (FR-017).
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := otelProv.Shutdown(shutdownCtx); err != nil {
+			// Graceful shutdown: flush OTel first, then drain HTTP (FR-017).
+			// Each operation gets its own independent deadline so OTel flush
+			// time does not eat into the HTTP server's drain budget.
+			otelCtx, otelCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer otelCancel()
+			if err := otelProv.Shutdown(otelCtx); err != nil {
 				slog.Warn("otel shutdown error", "error", err)
 			}
-			if err := srv.Shutdown(shutdownCtx); err != nil {
+
+			srvCtx, srvCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer srvCancel()
+			if err := srv.Shutdown(srvCtx); err != nil {
 				slog.Warn("server shutdown error", "error", err)
 			}
 			return nil

@@ -5,6 +5,9 @@ import "errors"
 // ErrInvalidToken is returned when a refresh token is missing, expired, or revoked.
 var ErrInvalidToken = errors.New("invalid or expired token")
 
+// ErrNotFound is returned when a requested resource does not exist.
+var ErrNotFound = errors.New("not found")
+
 // Role represents the authorization level of a user.
 type Role string
 

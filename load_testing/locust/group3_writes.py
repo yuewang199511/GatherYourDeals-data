@@ -24,7 +24,7 @@ import uuid
 
 from locust import constant_throughput, task
 
-from common import BaseGYDUser, configure_context, load_config, login, make_shape
+from common import BaseGYDUser, configure_context, load_config, login, make_shape, safe_login
 
 _cfg = load_config()
 
@@ -58,7 +58,7 @@ class WriteUser(BaseGYDUser):
     def on_start(self):
         super().on_start()
         cfg = load_config()
-        pair = login(cfg["target_url"], cfg["username"], cfg["password"])
+        pair = safe_login(self.environment, cfg["target_url"], cfg["username"], cfg["password"])
         self._headers = {
             "Authorization": f"Bearer {pair['access']}",
             "Content-Type": "application/json",

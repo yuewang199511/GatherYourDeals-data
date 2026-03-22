@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"time"
 
 	"github.com/gatheryourdeals/data/internal/model"
@@ -39,7 +40,9 @@ func (s *RefreshTokenStore) Find(ctx context.Context, token string) (string, err
 		return "", err
 	}
 	if time.Now().Unix() > expiresAt {
-		_, _ = s.db.conn.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE token = $1`, token)
+		if _, derr := s.db.conn.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE token = $1`, token); derr != nil {
+			slog.Warn("failed to delete expired refresh token", "error", derr)
+		}
 		return "", model.ErrInvalidToken
 	}
 	return userID, nil

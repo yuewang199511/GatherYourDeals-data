@@ -108,17 +108,11 @@ func (h *ReceiptHandler) ListReceipts(c *gin.Context) {
 func (h *ReceiptHandler) DeleteReceipt(c *gin.Context) {
 	id := c.Param("id")
 
-	receipt, err := h.receipts.GetReceiptByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up receipt"})
-		return
-	}
-	if receipt == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "receipt not found"})
-		return
-	}
-
 	if err := h.receipts.DeleteReceipt(c.Request.Context(), id); err != nil {
+		if errors.Is(err, model.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "receipt not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete receipt"})
 		return
 	}

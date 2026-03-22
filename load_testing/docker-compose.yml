@@ -1,13 +1,15 @@
 # Docker Compose for the GatherYourDeals load testing suite.
 #
-# This file defines the Locust service used by run_all.sh and run_group.sh.
+# Distributed mode: 1 master + 4 workers, all using network_mode: host.
 # The runner scripts invoke:
-#   docker compose run --rm locust -f locust/<group>.py --headless ...
+#   docker compose up -d --scale locust-worker=4 --no-recreate locust-worker
+#   docker compose run --rm locust-master -f locust/<group>.py --master --headless ...
+#   docker compose stop locust-worker && docker compose rm -f locust-worker
 #
 # Setup:
 #   1. cp .env.example .env  (fill in GYD_TEST_USERNAME + GYD_TEST_PASSWORD)
 #   2. mkdir -p results
-#   3. ./run_all.sh              (full suite, ~18 min)
+#   3. ./run_all.sh              (full suite)
 #   OR ./run_group.sh 2          (single group, both phases)
 #
 # Note on networking:
@@ -15,7 +17,7 @@
 #   On macOS / Windows Docker Desktop set GYD_TARGET_URL=http://host.docker.internal:8080
 
 services:
-  locust:
+  locust-master:
     image: locustio/locust:2.32.0
     network_mode: host
     working_dir: /home/locust
@@ -26,11 +28,47 @@ services:
       - GYD_TARGET_URL
       - GYD_TEST_USERNAME
       - GYD_TEST_PASSWORD
+      - GYD_ADMIN_USERNAME
+      - GYD_ADMIN_PASSWORD
       - GYD_PLATFORM_NAME
       - GYD_DB_TYPE
       - GYD_PHASE
       - GYD_RESULTS_DIR
+      - GYD_RPS_MODERATE
+      - GYD_RPS_STRESS
+      - GYD_RAMP_TIME
+      - GYD_MODERATE_DURATION
+      - GYD_STRESS_HOLD
+      - GYD_META_RPS_MODERATE
+      - GYD_META_RPS_STRESS
       - HONEYCOMB_API_KEY
       - HONEYCOMB_DATASET
-    # entrypoint / command are supplied by the runner scripts via
-    # `docker compose run --rm locust -f locust/... --headless ...`
+    # Command is supplied by runner scripts:
+    # docker compose run --rm locust-master -f locust/... --master --headless ...
+
+  locust-worker:
+    image: locustio/locust:2.32.0
+    network_mode: host
+    working_dir: /home/locust
+    volumes:
+      - ./locust:/home/locust/locust:ro
+    environment:
+      - GYD_TARGET_URL
+      - GYD_TEST_USERNAME
+      - GYD_TEST_PASSWORD
+      - GYD_ADMIN_USERNAME
+      - GYD_ADMIN_PASSWORD
+      - GYD_PLATFORM_NAME
+      - GYD_DB_TYPE
+      - GYD_PHASE
+      - GYD_RPS_MODERATE
+      - GYD_RPS_STRESS
+      - GYD_RAMP_TIME
+      - GYD_MODERATE_DURATION
+      - GYD_STRESS_HOLD
+      - GYD_META_RPS_MODERATE
+      - GYD_META_RPS_STRESS
+      - HONEYCOMB_API_KEY
+      - HONEYCOMB_DATASET
+    # LOCUST_FILE is exported by the runner script before `docker compose up`
+    command: --worker --master-host=localhost -f locust/${LOCUST_FILE}

@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -388,8 +389,9 @@ func TestReceipt_Delete(t *testing.T) {
 func TestReceipt_DeleteNonexistent(t *testing.T) {
 	env := newReceiptEnv(t)
 
-	if err := env.receipts.DeleteReceipt(env.ctx, "nonexistent"); err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	err := env.receipts.DeleteReceipt(env.ctx, "nonexistent")
+	if !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 

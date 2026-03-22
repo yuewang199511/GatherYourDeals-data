@@ -1,8 +1,9 @@
 package handler
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/gatheryourdeals/data/internal/auth"
 	"github.com/gatheryourdeals/data/internal/middleware"
@@ -42,7 +43,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 	user, err := h.service.Register(c.Request.Context(), req.Username, req.Password)
-	if err == auth.ErrUsernameExists {
+	if errors.Is(err, auth.ErrUsernameExists) {
 		c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
 		return
 	}
@@ -66,7 +67,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	user, err := h.service.Login(c.Request.Context(), req.Username, req.Password)
-	if err == auth.ErrInvalidCredential {
+	if errors.Is(err, auth.ErrInvalidCredential) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
 		return
 	}
@@ -123,21 +124,18 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 		return
 	}
-	_ = h.tokens.RevokeRefreshToken(c.Request.Context(), req.RefreshToken)
+	if err := h.tokens.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
+		slog.Warn("failed to revoke refresh token on logout", "error", err)
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
 // Me handles GET /api/v1/sessions/me — returns the current user's info from the token.
 func (h *AuthHandler) Me(c *gin.Context) {
-	header := c.GetHeader("Authorization")
-	parts := strings.SplitN(header, " ", 2)
-	claims, err := h.tokens.ValidateAccessToken(parts[1])
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-		return
-	}
+	userID, _ := c.Get(middleware.ContextKeyUserID)
+	role, _ := c.Get(middleware.ContextKeyRole)
 	c.JSON(http.StatusOK, gin.H{
-		"id":   claims.UserID,
-		"role": claims.Role,
+		"id":   userID,
+		"role": role,
 	})
 }
