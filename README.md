@@ -85,6 +85,21 @@ log:
 | Local | `./logs/` |
 | Docker | `./data/logs/` (mounted from container's `/data/logs/`) |
 
+## GitHub Actions CI Setup
+
+The integration test workflow requires five repository secrets. Set them at:
+**Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret | Description |
+|:-------|:------------|
+| `GYD_JWT_SECRET` | Random hex string — run `openssl rand -hex 32` to generate |
+| `GYD_ADMIN_USERNAME` | Admin account username (used by `./gatheryourdeals init` and admin tests) |
+| `GYD_ADMIN_PASSWORD` | Admin account password |
+| `GYD_TEST_USERNAME` | Regular test user username (auto-registered by the test suite) |
+| `GYD_TEST_PASSWORD` | Regular test user password |
+
+The workflow builds the binary, initialises a fresh SQLite database, starts the server, then runs the full pytest integration suite on every push to `main`/`develop` and on pull requests targeting `main`.
+
 ## Development
 
 ### Fixing lint/formatting issues

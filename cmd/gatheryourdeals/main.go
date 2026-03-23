@@ -27,6 +27,8 @@ import (
 
 var configPath string
 
+var stdinReader = bufio.NewReader(os.Stdin)
+
 func main() {
 	root := &cobra.Command{
 		Use:   "gatheryourdeals",
@@ -333,9 +335,8 @@ func promptPasswordWithConfirm(label string) (string, error) {
 }
 
 func promptInput(label string) (string, error) {
-	reader := bufio.NewReader(os.Stdin)
 	fmt.Print(label)
-	input, err := reader.ReadString('\n')
+	input, err := stdinReader.ReadString('\n')
 	if err != nil {
 		return "", err
 	}
