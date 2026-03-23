@@ -71,7 +71,7 @@ def test_register_duplicate(config):
 # Login
 # ---------------------------------------------------------------------------
 
-def test_login_success(config):
+def test_login_success(config, user_session):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/login",
         json={"username": config["username"], "password": config["password"]},
