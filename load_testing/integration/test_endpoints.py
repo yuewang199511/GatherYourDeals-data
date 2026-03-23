@@ -6,7 +6,6 @@ Tests run against a live server; no mocking. Data created during tests is not cl
 (data volume is small and bounded).
 """
 
-import os
 import uuid
 
 import pytest
@@ -195,22 +194,6 @@ def test_list_receipts_success(config, user_session):
     body = resp.json()
     assert "data" in body
     assert isinstance(body["data"], list)
-
-
-def test_seed_receipt_count(config, user_session):
-    resp = requests.get(
-        f"{config['base_url']}/api/v1/receipts",
-        headers=user_session["headers"],
-        timeout=10,
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    seed_count = int(os.environ.get("GYD_SEED_COUNT", "1000"))
-    actual = body.get("total", 0)
-    assert actual >= seed_count, (
-        f"Expected at least {seed_count} receipts (GYD_SEED_COUNT), got {actual}. "
-        "Re-run seed.py to create the missing receipts."
-    )
 
 
 def test_get_receipt_success(config, user_session):
