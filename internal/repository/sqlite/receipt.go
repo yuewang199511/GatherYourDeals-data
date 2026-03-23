@@ -71,10 +71,16 @@ func (r *ReceiptRepo) GetReceiptByID(ctx context.Context, id string) (*model.Rec
 }
 
 func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, params model.PaginationParams) (*model.Page[*model.Receipt], error) {
-	// Single query: window function returns total alongside each row.
+	var total int
+	if err := r.db.conn.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM receipts WHERE user_id = ?`, userID,
+	).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count receipts: %w", err)
+	}
+
 	// SortBy and SortOrder are validated by the handler.
 	query := fmt.Sprintf(
-		`SELECT `+receiptColumns+`, COUNT(*) OVER() FROM receipts WHERE user_id = ? ORDER BY %s %s LIMIT ? OFFSET ?`,
+		`SELECT `+receiptColumns+` FROM receipts WHERE user_id = ? ORDER BY %s %s LIMIT ? OFFSET ?`,
 		params.SortBy, params.SortOrder,
 	)
 	rows, err := r.db.conn.QueryContext(ctx, query, userID, params.Limit, params.Offset)
@@ -84,7 +90,6 @@ func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, par
 	defer func() { _ = rows.Close() }()
 
 	var receipts []*model.Receipt
-	var total int
 	for rows.Next() {
 		var rec model.Receipt
 		var extrasStr string
@@ -92,7 +97,7 @@ func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, par
 			&rec.ID, &rec.ProductName, &rec.PurchaseDate,
 			&rec.Price, &rec.Amount, &rec.StoreName,
 			&rec.Latitude, &rec.Longitude, &extrasStr,
-			&rec.UploadTime, &rec.UserID, &total,
+			&rec.UploadTime, &rec.UserID,
 		); err != nil {
 			return nil, fmt.Errorf("scan receipt row: %w", err)
 		}
@@ -103,13 +108,6 @@ func (r *ReceiptRepo) ListReceiptsByUser(ctx context.Context, userID string, par
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	if len(receipts) == 0 && params.Offset > 0 {
-		if err := r.db.conn.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM receipts WHERE user_id = ?`, userID,
-		).Scan(&total); err != nil {
-			return nil, fmt.Errorf("count receipts: %w", err)
-		}
 	}
 
 	page := &model.Page[*model.Receipt]{

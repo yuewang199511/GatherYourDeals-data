@@ -116,8 +116,10 @@ class MiscUser(BaseGYDUser):
 
 # Set task weights dynamically so refresh tracks GYD_RPS_MODERATE
 # while meta stays at its fixed lower rate (namespace constraints).
-MiscUser.tasks = {
-    MiscUser.refresh_token:     _cfg["rps_moderate"],
-    MiscUser.create_meta_field: _META_MODERATE,
-    MiscUser.update_meta_field: _META_MODERATE,
-}
+# Use a repeated list instead of a dict — Locust's post-definition dict
+# assignment with method-reference keys does not apply weights correctly.
+MiscUser.tasks = (
+    [MiscUser.refresh_token]     * _cfg["rps_moderate"] +
+    [MiscUser.create_meta_field] * _META_MODERATE +
+    [MiscUser.update_meta_field] * _META_MODERATE
+)
