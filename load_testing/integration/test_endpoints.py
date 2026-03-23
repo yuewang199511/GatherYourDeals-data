@@ -83,7 +83,7 @@ def test_login_success(config, user_session):
     assert "refresh_token" in body
 
 
-def test_login_wrong_password(config):
+def test_login_wrong_password(config, user_session):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/login",
         json={"username": config["username"], "password": "definitelywrong"},
