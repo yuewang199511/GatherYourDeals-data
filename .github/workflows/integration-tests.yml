@@ -51,6 +51,18 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
+      - name: Debug secret lengths
+        env:
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+        run: |
+          echo "GYD_TEST_USERNAME  length: ${#GYD_TEST_USERNAME}"
+          echo "GYD_TEST_PASSWORD  length: ${#GYD_TEST_PASSWORD}"
+          echo "GYD_ADMIN_USERNAME length: ${#GYD_ADMIN_USERNAME}"
+          echo "GYD_ADMIN_PASSWORD length: ${#GYD_ADMIN_PASSWORD}"
+
       - name: Run integration tests
         env:
           GYD_TARGET_URL: http://localhost:8080
