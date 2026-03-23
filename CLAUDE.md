@@ -1,6 +1,6 @@
 # GatherYourDeals-data Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-03-17
+Auto-generated from all feature plans. Last updated: 2026-03-22
 
 ## Active Technologies
 - Go 1.25.7 + Gin (HTTP), `database/sql` (DB abstraction), Goose v3 (migrations — not used by this feature), `mattn/go-sqlite3` (SQLite), `pgx/v5` (PostgreSQL) (002-api-list-pagination)
@@ -9,6 +9,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-17
 - SQLite (primary) + PostgreSQL; both instrumented via `otelsql` driver wrapper (004-add-otel-honeycomb)
 - Python 3.11 + `locustio/locust:2.32.0`, `requests` (HTTP), `concurrent.futures` (stdlib) (005-fix-logout-group-pool)
 - N/A — in-process `queue.Queue` only; results written to `load_testing/results/` (existing) (005-fix-logout-group-pool)
+- Python 3.11 (integration tests); Go 1.25 (service under test — unchanged) + `pytest>=8.0`, `requests>=2.31`, `python-dotenv==1.0.1` (all in venv) (006-integration-tests)
+- SQLite (default local) or PostgreSQL — no changes; tests hit the live DB via HTTP (006-integration-tests)
 
 - Go 1.25 (as declared in `go.mod`) + Gin (HTTP), Cobra (CLI), Goose v3 (migrations), `database/sql` (DB abstraction); adding `pgx/v5` (PostgreSQL driver, pure Go) (001-add-postgres-support)
 - Python 3.11 + Locust 2.32 (headless load testing); Docker Compose; Bash runner scripts; `load_testing/` directory (003-load-testing-env-config)
@@ -29,9 +31,9 @@ tests/
 Go 1.25 (as declared in `go.mod`): Follow standard conventions
 
 ## Recent Changes
+- 006-integration-tests: Added Python 3.11 (integration tests); Go 1.25 (service under test — unchanged) + `pytest>=8.0`, `requests>=2.31`, `python-dotenv==1.0.1` (all in venv)
 - 005-fix-logout-group-pool: Added Python 3.11 + `locustio/locust:2.32.0`, `requests` (HTTP), `concurrent.futures` (stdlib)
 - 004-add-otel-honeycomb: Added Go 1.25.7 (service); Python 3.11 + Locust 2.32 (load testing)
-- 003-load-testing-env-config: Added Python 3.11 + Locust (`locustio/locust:2.32.0`), Docker Compose load testing suite; `load_testing/` directory with 4 group locustfiles, runner scripts, and `results/` output
 
 
 <!-- MANUAL ADDITIONS START -->
@@ -94,4 +96,12 @@ cp snapshot.db /path/to/data.db
 docker compose start app
 ```
 If the service is running when you copy, Docker keeps the old file descriptor open and the copy lands on a new inode that the running process never sees — the restore silently has no effect.
+
+## load testing monitoring with few tokens
+
+Please save tokens by following these guidelines when performing load testing:
+1. only look at the failure records, you can even only check the records after the experiment finished rather than always follow it
+
+## python running guidelines
+1. use venv for activating the environment
 <!-- MANUAL ADDITIONS END -->
