@@ -1,0 +1,63 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o gatheryourdeals ./cmd/gatheryourdeals
+
+      - name: Initialise database and create admin account
+        env:
+          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+        run: |
+          printf '%s\n%s\n%s\n' \
+            "${{ secrets.GYD_ADMIN_USERNAME }}" \
+            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
+            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
+            | ./gatheryourdeals init
+
+      - name: Start server
+        env:
+          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+        run: ./gatheryourdeals serve &
+
+      - name: Wait for server to be ready
+        run: |
+          curl --retry 15 --retry-delay 1 --retry-connrefused \
+               -sf http://localhost:8080/health
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install -r load_testing/requirements.txt
+
+      - name: Run integration tests
+        env:
+          GYD_TARGET_URL: http://localhost:8080
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+        run: |
+          cd load_testing
+          python3 -m pytest integration/ -v

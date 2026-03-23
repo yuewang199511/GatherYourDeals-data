@@ -1,2 +1,4 @@
 locust==2.32.0
 python-dotenv==1.0.1
+pytest>=8.0
+requests>=2.31
