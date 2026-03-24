@@ -159,6 +159,16 @@ if ! curl -sf --max-time 10 "${GYD_TARGET_URL}/health" -o /dev/null 2>/dev/null;
 fi
 log "Service is reachable."
 
+# ── Seed guardrail check ──────────────────────────────────────────────────────
+
+log "Running seed guardrail check …"
+if ! "$SCRIPT_DIR/run_guardrail.sh"; then
+    err "Seed guardrail failed — re-seed the database before running load tests."
+    err "  Seed: cd load_testing && python3 seed.py"
+    exit 4
+fi
+log "Guardrail passed."
+
 # ── Ensure results directory exists ──────────────────────────────────────────
 
 RUN_TIMESTAMP=$(date +%Y%m%d_%H%M%S)

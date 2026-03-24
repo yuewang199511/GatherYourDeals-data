@@ -11,6 +11,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-22
 - N/A — in-process `queue.Queue` only; results written to `load_testing/results/` (existing) (005-fix-logout-group-pool)
 - Python 3.11 (integration tests); Go 1.25 (service under test — unchanged) + `pytest>=8.0`, `requests>=2.31`, `python-dotenv==1.0.1` (all in venv) (006-integration-tests)
 - SQLite (default local) or PostgreSQL — no changes; tests hit the live DB via HTTP (006-integration-tests)
+- Python 3.11 (integration tests); Bash (runner scripts) + pytest ≥ 8.0, requests ≥ 2.31, python-dotenv 1.0.1 — all already in `load_testing/.venv`; no new dependencies required (007-seed-guardrail-tests)
+- N/A — guardrail is read-only against the live service (007-seed-guardrail-tests)
 
 - Go 1.25 (as declared in `go.mod`) + Gin (HTTP), Cobra (CLI), Goose v3 (migrations), `database/sql` (DB abstraction); adding `pgx/v5` (PostgreSQL driver, pure Go) (001-add-postgres-support)
 - Python 3.11 + Locust 2.32 (headless load testing); Docker Compose; Bash runner scripts; `load_testing/` directory (003-load-testing-env-config)
@@ -31,9 +33,9 @@ tests/
 Go 1.25 (as declared in `go.mod`): Follow standard conventions
 
 ## Recent Changes
+- 007-seed-guardrail-tests: Added Python 3.11 (integration tests); Bash (runner scripts) + pytest ≥ 8.0, requests ≥ 2.31, python-dotenv 1.0.1 — all already in `load_testing/.venv`; no new dependencies required
 - 006-integration-tests: Added Python 3.11 (integration tests); Go 1.25 (service under test — unchanged) + `pytest>=8.0`, `requests>=2.31`, `python-dotenv==1.0.1` (all in venv)
 - 005-fix-logout-group-pool: Added Python 3.11 + `locustio/locust:2.32.0`, `requests` (HTTP), `concurrent.futures` (stdlib)
-- 004-add-otel-honeycomb: Added Go 1.25.7 (service); Python 3.11 + Locust 2.32 (load testing)
 
 
 <!-- MANUAL ADDITIONS START -->
@@ -104,4 +106,24 @@ Please save tokens by following these guidelines when performing load testing:
 
 ## python running guidelines
 1. use venv for activating the environment
+
+## load testing workflow
+
+Always use `docker compose` to run the service for load testing. Never use the local binary.
+
+```bash
+# 1. Start the service
+docker compose up --build -d
+
+# 2. Seed the database
+cd load_testing && python3 seed.py
+
+# 3. Run the full load test suite
+./run_all.sh
+
+# 4. Clean up when done
+cd .. && docker compose down
+```
+
+The guardrail (`run_guardrail.sh`) runs automatically inside `run_all.sh` and `run_group.sh` before any Locust traffic starts. If the seed state is bad, the load test aborts before sending requests.
 <!-- MANUAL ADDITIONS END -->

@@ -227,6 +227,11 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
     def _on_test_start(environment, **kwargs):
         cfg = load_config()
         phase = cfg["phase"]
+        intended_duration = (
+            cfg["moderate_duration"]
+            if phase == "moderate"
+            else cfg["ramp_time"] + cfg["stress_hold"]
+        )
         _context_data.update(
             {
                 "test_run_id": TEST_RUN_ID,
@@ -241,6 +246,7 @@ def configure_context(group_name, moderate_target_rps, stress_target_rps,
                 "num_users": moderate_users
                 if phase == "moderate"
                 else stress_peak_users,
+                "intended_duration_seconds": intended_duration,
                 "test_start": datetime.now(timezone.utc).isoformat(),
                 # internal — stripped before writing
                 "_start_ts": time.monotonic(),

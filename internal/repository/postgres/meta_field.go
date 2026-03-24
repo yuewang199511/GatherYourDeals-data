@@ -47,10 +47,14 @@ func (r *MetaFieldRepo) GetField(ctx context.Context, fieldName string) (*model.
 }
 
 func (r *MetaFieldRepo) ListFields(ctx context.Context, params model.PaginationParams) (*model.Page[*model.MetaField], error) {
-	// Single query: window function returns total alongside each row.
+	var total int
+	if err := r.db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta_fields`).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count meta fields: %w", err)
+	}
+
 	// SortBy and SortOrder are validated by the handler.
 	query := fmt.Sprintf(
-		`SELECT `+metaColumns+`, COUNT(*) OVER() FROM meta_fields ORDER BY %s %s LIMIT $1 OFFSET $2`,
+		`SELECT `+metaColumns+` FROM meta_fields ORDER BY %s %s LIMIT $1 OFFSET $2`,
 		params.SortBy, params.SortOrder,
 	)
 	rows, err := r.db.conn.QueryContext(ctx, query, params.Limit, params.Offset)
@@ -60,21 +64,15 @@ func (r *MetaFieldRepo) ListFields(ctx context.Context, params model.PaginationP
 	defer func() { _ = rows.Close() }()
 
 	var fields []*model.MetaField
-	var total int
 	for rows.Next() {
 		var f model.MetaField
-		if err := rows.Scan(&f.FieldName, &f.Description, &f.FieldType, &f.Native, &total); err != nil {
+		if err := rows.Scan(&f.FieldName, &f.Description, &f.FieldType, &f.Native); err != nil {
 			return nil, fmt.Errorf("scan meta field: %w", err)
 		}
 		fields = append(fields, &f)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	if len(fields) == 0 && params.Offset > 0 {
-		if err := r.db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta_fields`).Scan(&total); err != nil {
-			return nil, fmt.Errorf("count meta fields: %w", err)
-		}
 	}
 
 	page := &model.Page[*model.MetaField]{
