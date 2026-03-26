@@ -6,6 +6,6 @@ variable "run_id" {
 variable "location" {
   description = "Azure region for all resources"
   type        = string
-  default     = "eastus"
+  default     = "eastus2"
 }
 
