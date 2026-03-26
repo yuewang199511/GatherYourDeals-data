@@ -57,6 +57,8 @@ USERNAME = os.environ.get("GYD_TEST_USERNAME", "")
 PASSWORD = os.environ.get("GYD_TEST_PASSWORD", "")
 NUM_RECEIPTS = int(os.environ.get("GYD_SEED_COUNT", "1000"))
 WORKERS = int(os.environ.get("GYD_SEED_WORKERS", "10"))
+# Remote services (Railway, Azure) are slower than localhost — raise timeout accordingly
+TIMEOUT = int(os.environ.get("GYD_SEED_TIMEOUT", "30"))
 
 _STORES = ["Supermart", "TechStore", "FreshGrocer", "BookWorld", "CafePrime"]
 _PRODUCTS = ["Laptop", "Coffee", "Notebook", "Groceries", "Headphones", "Monitor", "Keyboard"]
@@ -66,7 +68,7 @@ def _register(username: str, password: str) -> None:
     resp = requests.post(
         f"{BASE_URL}/api/v1/users",
         json={"username": username, "password": password},
-        timeout=10,
+        timeout=TIMEOUT,
     )
     if resp.status_code == 201:
         print(f"  Created user '{username}'")
@@ -81,7 +83,7 @@ def _login(username: str, password: str) -> str:
     resp = requests.post(
         f"{BASE_URL}/api/v1/auth/login",
         json={"username": username, "password": password},
-        timeout=10,
+        timeout=TIMEOUT,
     )
     if resp.status_code != 200:
         print(f"ERROR: login failed: HTTP {resp.status_code} — {resp.text[:200]}", file=sys.stderr)
@@ -101,7 +103,7 @@ def _post_receipt(session: requests.Session, token: str, index: int) -> bool:
         f"{BASE_URL}/api/v1/receipts",
         json=payload,
         headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+        timeout=TIMEOUT,
     )
     return resp.status_code == 201
 
