@@ -27,7 +27,7 @@ feature/* ──PR──► develop ──PR──► main
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `RAILWAY_TOKEN` | integration-tests (post-merge), load-tests | Project token scoped to load-test env (see token scope section below) |
+| `RAILWAY_TOKEN` | integration-tests, load-tests | Project token scoped to **load-test** env only — no production deploy workflow exists yet, so one token is enough |
 | `GYD_JWT_SECRET` | integration-tests (pre-merge) | Must be ≥ 32 characters |
 | `GYD_ADMIN_USERNAME` | integration-tests, load-tests | Admin account credentials |
 | `GYD_ADMIN_PASSWORD` | integration-tests, load-tests | Admin account credentials |
