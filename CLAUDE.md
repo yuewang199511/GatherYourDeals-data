@@ -88,7 +88,11 @@ Please also revisit the README.md and make sure the operations and deployments m
 
 If you receive any request that needs to start those subagents defined in this repo, let the user know.
 
-# Prerequisites
+# environment preqrequisites
+
+Please scan all the CLAUDE.md and make sure the possible commands that needs to be installed with sudo exists! If not, let user install them and try again!
+
+# Tracing Prerequisites
 
 Before starting any testing workflow that involves Honeycomb, ensure the relevant subagent checks the following keys before running `/honeycomb-setup`:
 
@@ -172,6 +176,17 @@ Let subagents do this work, not you.
 # permision
 
 if you need sudo permission, please ask me
+
+# Missing CLI Tools
+
+If a required CLI tool is not installed (e.g. `gh`, `docker`, `jq`), do not silently fall back to an alternative approach. Instead:
+
+1. Stop immediately
+2. Tell the user exactly what is missing and the install command, e.g.:
+   > `gh` is not installed. Run: `! sudo apt install gh` then `! gh auth login`
+3. Wait for the user to install it
+
+Once the user installs the tool in the same session (using `! <command>`), it activates immediately — no restart needed. Resume from where you stopped.
 
 
 <!-- MANUAL ADDITIONS END -->
