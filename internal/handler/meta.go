@@ -65,7 +65,11 @@ func (h *MetaHandler) CreateField(c *gin.Context) {
 	}
 
 	if err := h.meta.CreateField(c.Request.Context(), field); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "field already exists"})
+		if errors.Is(err, model.ErrMetaFieldExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": "field already exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create field"})
 		return
 	}
 

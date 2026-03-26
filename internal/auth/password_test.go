@@ -1,7 +1,10 @@
 package auth_test
 
 import (
+	"errors"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gatheryourdeals/data/internal/auth"
 )
@@ -40,7 +43,7 @@ func TestCheckPassword_Wrong(t *testing.T) {
 	hash, _ := auth.HashPassword("mypassword")
 
 	err := auth.CheckPassword("wrongpassword", hash)
-	if err == nil {
-		t.Fatal("expected error for wrong password, got nil")
+	if !errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+		t.Fatalf("expected bcrypt.ErrMismatchedHashAndPassword, got %v", err)
 	}
 }

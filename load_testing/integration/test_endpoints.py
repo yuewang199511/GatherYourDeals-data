@@ -239,7 +239,7 @@ def test_delete_receipt_success(config, user_session):
         headers=user_session["headers"],
         timeout=10,
     )
-    assert resp.status_code in (200, 204)
+    assert resp.status_code == 200
 
     resp = requests.get(
         f"{config['base_url']}/api/v1/receipts/{receipt_id}",
@@ -298,7 +298,7 @@ def test_delete_user_success(config, admin_session):
         headers=admin_session["headers"],
         timeout=10,
     )
-    assert resp.status_code in (200, 204)
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------

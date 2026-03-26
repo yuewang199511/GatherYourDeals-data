@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/gatheryourdeals/data/internal/model"
@@ -99,8 +100,8 @@ func TestMetaField_CreateDuplicate(t *testing.T) {
 	}
 
 	err := repo.CreateField(ctx, field)
-	if err == nil {
-		t.Fatal("expected error on duplicate field, got nil")
+	if !errors.Is(err, model.ErrMetaFieldExists) {
+		t.Fatalf("expected ErrMetaFieldExists on duplicate field, got %v", err)
 	}
 }
 
@@ -117,8 +118,8 @@ func TestMetaField_CreateDuplicate_NativeField(t *testing.T) {
 	}
 
 	err := repo.CreateField(ctx, field)
-	if err == nil {
-		t.Fatal("expected error when creating field with native name, got nil")
+	if !errors.Is(err, model.ErrMetaFieldExists) {
+		t.Fatalf("expected ErrMetaFieldExists when creating field with native name, got %v", err)
 	}
 }
 
@@ -169,8 +170,8 @@ func TestMetaField_UpdateDescription_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	err := repo.UpdateDescription(ctx, "nonexistent", "new desc")
-	if err == nil {
-		t.Fatal("expected error for nonexistent field, got nil")
+	if !errors.Is(err, model.ErrFieldNotFound) {
+		t.Fatalf("expected ErrFieldNotFound for nonexistent field, got %v", err)
 	}
 }
 
