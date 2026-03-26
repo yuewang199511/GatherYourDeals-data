@@ -30,9 +30,9 @@ Both branches have `strict: true` — the PR branch must include all latest chan
 | `build.yml` | PR/push → develop, main | Docker build check |
 | `code-quality.yml` | PR/push → develop, main | golangci-lint |
 | `security.yml` | PR/push → develop, main | govulncheck |
-| `integration-tests.yml` | PR → develop, main | Pre-merge: deploy to Railway load-test + run integration tests |
-| `integration-tests.yml` | push → develop | Post-merge: re-run integration tests against Railway load-test |
-| `load-tests.yml` | Manual (`workflow_dispatch`) | Full Locust load test suite against Railway load-test |
+| `integration-tests.yml` | PR → develop, main | Pre-merge: deploy to cloud provider (currently Railway load-test) + run integration tests |
+| `integration-tests.yml` | push → develop | Post-merge: re-run integration tests against cloud provider |
+| `load-tests.yml` | Manual (`workflow_dispatch`) | Full Locust load test suite against cloud provider (currently Railway load-test) |
 | `protect-main.yml` | PR → main | Blocks merge if source branch ≠ develop |
 
 ## Provider-Specific Docs
