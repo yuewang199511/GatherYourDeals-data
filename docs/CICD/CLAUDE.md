@@ -54,3 +54,39 @@ The `load-test` environment needs its own Postgres instance. If `postgres.railwa
 
 ### 7. Raw Railway GraphQL API requires account-level token
 `project { environments { ... } }` via `backboard.railway.app/graphql/v2` returns `Not Authorized` with a project token. Use the Railway CLI instead.
+
+### 8. `DOMAIN=$(railway domain ...)` silently exits under `set -e` when the command fails
+GitHub Actions runs bash with `-eo pipefail` by default. Assigning via `VAR=$(cmd)` without an `if` guard triggers `set -e` on failure — the script exits before any empty-check runs.
+
+**Wrong:**
+```bash
+DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
+if [ -z "$DOMAIN" ]; then ...   # never reached if railway domain fails
+```
+**Right:** use `if !` to capture both failure and empty result:
+```bash
+if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+  echo "ERROR: railway domain command failed: $DOMAIN"
+  exit 1
+fi
+if [ -z "$DOMAIN" ]; then ...
+```
+This was present in both `integration-tests.yml` and `load-tests.yml`.
+
+### 9. `railway run -- sh -c 'psql ... -f /tmp/file.sql'` is fragile — use `-c` instead
+`railway run` injects Railway env vars and runs the command **locally** on the CI runner. Writing SQL to a temp file and passing it via `-f` works, but is needlessly fragile (file may not exist if a prior step exited early under `set -e`). Pass the SQL inline with `-c`:
+
+**Wrong:**
+```bash
+echo "TRUNCATE ..." > /tmp/reset.sql
+railway run --service "..." -- sh -c 'psql "$DATABASE_PUBLIC_URL" -f /tmp/reset.sql'
+```
+**Right:**
+```bash
+RESET_SQL="TRUNCATE ..."
+if ! railway run --service "..." -- psql "$DATABASE_PUBLIC_URL" -c "$RESET_SQL"; then
+  echo "ERROR: Database reset failed"
+  exit 1
+fi
+```
+The `if !` guard also prevents silent exit under `set -e`. This was present in both `integration-tests.yml` and `load-tests.yml`.

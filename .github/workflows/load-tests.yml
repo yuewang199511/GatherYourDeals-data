@@ -3,12 +3,24 @@ name: Load Tests
 on:
   workflow_dispatch:
     inputs:
-      phase:
-        description: "Load test phase"
+      group:
+        description: "Group to run (all = full suite via run_all.sh)"
         required: true
-        default: "moderate"
+        default: "all"
         type: choice
         options:
+          - all
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+      phase:
+        description: "Phase to run — ignored when group is 'all'"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
           - moderate
           - stress
 
@@ -33,10 +45,15 @@ jobs:
         run: |
           railway up --service "GatherYourDeals-data"
 
-          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
+          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
+            exit 1
+          fi
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: Could not get domain for load-test environment."
-            echo "railway domain output: $(railway domain --json 2>&1)"
+            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
             exit 1
           fi
 
@@ -67,8 +84,14 @@ jobs:
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          echo "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';" > /tmp/reset.sql
-          railway run --service "GatherYourDeals-data" -- sh -c 'psql "$DATABASE_PUBLIC_URL" -f /tmp/reset.sql'
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # railway run injects Railway env vars locally; psql connects via DATABASE_PUBLIC_URL
+          # Use if-condition to capture failure rather than letting set -e exit silently
+          if ! railway run --service "GatherYourDeals-data" -- \
+               psql "$DATABASE_PUBLIC_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
           cd load_testing && python3 seed.py
 
       - name: Run load tests
@@ -78,7 +101,6 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
-          GYD_PHASE: ${{ inputs.phase }}
           GYD_PLATFORM_NAME: railway
           GYD_DB_TYPE: postgres
           GYD_RESULTS_DIR: results
@@ -86,7 +108,11 @@ jobs:
         run: |
           cd load_testing
           mkdir -p results
-          ./run_all.sh
+          if [ "${{ inputs.group }}" = "all" ]; then
+            ./run_all.sh
+          else
+            ./run_group.sh "${{ inputs.group }}" "${{ inputs.phase }}"
+          fi
 
       - name: Upload results
         if: always()

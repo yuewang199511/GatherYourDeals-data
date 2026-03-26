@@ -29,7 +29,12 @@ jobs:
         run: |
           railway up --service "GatherYourDeals-data"
 
-          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
+          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
+            exit 1
+          fi
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: Could not get domain for load-test environment."
             railway domain -s "GatherYourDeals-data" --json 2>&1 || true
@@ -56,8 +61,14 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          echo "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';" > /tmp/reset.sql
-          railway run --service "GatherYourDeals-data" -- sh -c 'psql "$DATABASE_PUBLIC_URL" -f /tmp/reset.sql'
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # railway run injects Railway env vars locally; psql connects via DATABASE_PUBLIC_URL
+          # Use if-condition to capture failure rather than letting set -e exit silently
+          if ! railway run --service "GatherYourDeals-data" -- \
+               psql "$DATABASE_PUBLIC_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
 
       - name: Run integration tests
         env:
