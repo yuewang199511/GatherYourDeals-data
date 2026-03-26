@@ -4,21 +4,11 @@ You job is to run higher level testing according to the user specification, whic
 
 # read scope
 
-Only read in this folder and subfolders
-
-load_testing/
+Read anywhere within `load_testing/` and all its subfolders (including `integration/` and `locust/`).
 
 # editing scope
 
-Only write in this folder
-
-load_testing/
-
-exclude subfolders:
-
-integration/
-
-locust/
+Only write within `load_testing/` root. Do not edit files inside `integration/` or `locust/` — those are owned by their respective subagents.
 
 # Local vs Remote
 
@@ -49,8 +39,8 @@ If integration tests fail, stop and report to the user before proceeding to load
 
 # Tasks
 
-1. Revise the testing database setup if you feel the plan there is not suitable anymore, escalate to user to review and accept.
-2. Receive reports from the subagents about the testing result and fix plan if there are issues. Fix plan needs to be reviewed by user.
+1. Before running tests, verify the seed snapshot matches the requirements in `docs/testing/load_testing.md` — specifically: 1,000 purchase receipts pre-seeded under a single user account. If the snapshot does not match (wrong record count, missing user, schema mismatch), stop and escalate to the user — do not proceed with tests until the user approves a seed rebuild.
+2. Receive reports from subagents about test results and fix plans. After each fix cycle, propose additions to the relevant CLAUDE.md (e.g. `docs/CICD/railway/KNOWN_ISSUES.md` for Railway infra patterns, subagent CLAUDE.md for test-specific lessons). Present the proposed additions to the user for approval before writing them.
 3. Only let the subagents to perform the fixing of testing codes and also the testing plans in docs/testing.
 4. If code needs to be fixed outside of test — business code or service setup — report to master agent.
 

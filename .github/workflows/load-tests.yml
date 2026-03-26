@@ -3,12 +3,32 @@ name: Load Tests
 on:
   workflow_dispatch:
     inputs:
-      phase:
-        description: "Load test phase"
+      provider:
+        description: "Cloud provider to run against"
         required: true
-        default: "moderate"
+        default: "railway"
         type: choice
         options:
+          - railway
+          - azure
+      group:
+        description: "Group to run (all = full suite via run_all.sh)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+      phase:
+        description: "Phase to run — ignored when group is 'all'"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
           - moderate
           - stress
 
@@ -25,58 +45,42 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Railway CLI
+        if: inputs.provider == 'railway'
         run: npm install -g @railway/cli
 
-      - name: Deploy develop to load-test environment
+      - name: Deploy and resolve load-test URL (Railway)
+        if: inputs.provider == 'railway'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway link "7639518c-e0a7-4cd4-8227-6c2575458620"
-          railway environment "load-test"
-          railway service "GatherYourDeals-data"
-          railway up --detach
-          echo "Deployment triggered. Waiting for health check..."
+          railway up --service "GatherYourDeals-data"
 
-      - name: Resolve load-test URL
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
-          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
-
-          ENV_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg pid "$PROJECT_ID" \
-              '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          ENV_ID=$(echo "$ENV_RESP" | jq -r \
-            '.data.project.environments.edges[] | select(.node.name == "load-test") | .node.id')
-
-          DOMAIN_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
-              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
-            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
-
+          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
+            exit 1
+          fi
           if [ -z "$DOMAIN" ]; then
-            echo "ERROR: No public domain found for load-test environment."
+            echo "ERROR: Could not get domain for load-test environment."
+            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
             exit 1
           fi
 
-          LOAD_TEST_URL="https://${DOMAIN}"
+          LOAD_TEST_URL="${DOMAIN}"
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
+
+      - name: Deploy and resolve load-test URL (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          echo "ERROR: Azure provider not yet implemented"
+          exit 1
 
       - name: Wait for load-test service to be healthy
         run: |
           echo "Polling $LOAD_TEST_URL/health ..."
-          curl --retry 30 --retry-delay 10 --retry-connrefused \
+          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
                --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
 
       - name: Set up Python
@@ -87,23 +91,34 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
-      - name: Check seed state and seed if needed
+      - name: Reset and seed load-test database (Railway)
+        if: inputs.provider == 'railway'
         env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           GYD_TARGET_URL: ${{ env.LOAD_TEST_URL || '' }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          cd load_testing
-          if python3 -m pytest integration/ \
-              -k "test_health or test_login_success or test_list_receipts_success" \
-              -q 2>/dev/null && python3 check_seed.py 2>/dev/null; then
-            echo "Guardrail passed — seed state is valid, skipping seed."
-          else
-            echo "Guardrail failed — seeding the load-test database..."
-            python3 seed.py
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment
+          if ! DB_URL=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
+            echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
+            exit 1
           fi
+          # Step 2: run psql directly with the resolved URL
+          if ! psql "$DB_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
+          cd load_testing && python3 seed.py
+
+      - name: Reset and seed load-test database (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          echo "ERROR: Azure provider not yet implemented"
+          exit 1
 
       - name: Run load tests
         env:
@@ -112,15 +127,18 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
-          GYD_PHASE: ${{ inputs.phase }}
-          GYD_PLATFORM_NAME: railway
+          GYD_PLATFORM_NAME: ${{ inputs.provider }}
           GYD_DB_TYPE: postgres
           GYD_RESULTS_DIR: results
           HONEYCOMB_API_KEY: ${{ secrets.HONEYCOMB_API_KEY }}
         run: |
           cd load_testing
           mkdir -p results
-          ./run_all.sh
+          if [ "${{ inputs.group }}" = "all" ]; then
+            ./run_all.sh
+          else
+            ./run_group.sh "${{ inputs.group }}" "${{ inputs.phase }}"
+          fi
 
       - name: Upload results
         if: always()

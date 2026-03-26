@@ -1,0 +1,4 @@
+# Bugs.
+
+- **GET /meta and GET /receipts slow**: P50 at 3600ms moderate / 19000ms stress — `GET /meta` uses `COUNT(*) OVER()`  for pagination which forces a full table scan on every request (no index can satisfy a window count without scanning all rows). Under concurrent load, SQLite serializes these scans internally, causing requests to queue. The effect snowballs: queued requests add latency, which keeps more requests in-flight, deepening the queue. LLM is not always good at using the database queries.
+- Distribution of load on the last group was even rather than ratio, that is why you see RPS is higher than intended.

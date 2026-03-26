@@ -3,8 +3,11 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	sqlite3 "github.com/mattn/go-sqlite3"
 
 	"github.com/gatheryourdeals/data/internal/model"
 )
@@ -30,6 +33,12 @@ func (r *UserRepo) CreateUser(ctx context.Context, user *model.User) error {
 	_, err := r.db.conn.ExecContext(ctx, query,
 		user.ID, user.Username, user.PasswordHash, string(user.Role), now, now)
 	if err != nil {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) &&
+			(sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique ||
+				sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey) {
+			return model.ErrUserExists
+		}
 		return fmt.Errorf("create user: %w", err)
 	}
 	return nil

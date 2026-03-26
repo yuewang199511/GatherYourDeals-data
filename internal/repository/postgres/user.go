@@ -3,8 +3,11 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/gatheryourdeals/data/internal/model"
 )
@@ -29,6 +32,10 @@ func (r *UserRepo) CreateUser(ctx context.Context, user *model.User) error {
 	_, err := r.db.conn.ExecContext(ctx, query,
 		user.ID, user.Username, user.PasswordHash, string(user.Role), now, now)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "users_username_key" {
+			return model.ErrUserExists
+		}
 		return fmt.Errorf("create user: %w", err)
 	}
 	return nil

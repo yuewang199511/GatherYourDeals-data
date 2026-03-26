@@ -39,7 +39,7 @@ service_structure
 
 3. Submit report following the format in `docs/testing/report_format.md`.
 
-4. Ask the master to push and create PR after fix is complete — escalate to user for approval.
+4. After fix is complete, escalate directly to the user to request PR approval — do not route through the master agent. Send the master agent a copy of the fix report for its records.
 
 # Report Extension
 

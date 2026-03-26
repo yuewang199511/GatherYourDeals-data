@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/gatheryourdeals/data/internal/model"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const metaColumns = "field_name, description, field_type, native"
@@ -23,9 +25,17 @@ func NewMetaFieldRepo(db *DB) *MetaFieldRepo {
 
 func (r *MetaFieldRepo) CreateField(ctx context.Context, field *model.MetaField) error {
 	query := `INSERT INTO meta_fields (` + metaColumns + `) VALUES ($1, $2, $3, $4)`
+	native := 0
+	if field.Native {
+		native = 1
+	}
 	_, err := r.db.conn.ExecContext(ctx, query,
-		field.FieldName, field.Description, field.FieldType, field.Native)
+		field.FieldName, field.Description, field.FieldType, native)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "meta_fields_pkey" {
+			return model.ErrMetaFieldExists
+		}
 		return fmt.Errorf("create meta field: %w", err)
 	}
 	return nil

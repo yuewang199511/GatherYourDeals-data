@@ -3,8 +3,11 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+
+	sqlite3 "github.com/mattn/go-sqlite3"
 
 	"github.com/gatheryourdeals/data/internal/model"
 )
@@ -30,6 +33,12 @@ func (r *MetaFieldRepo) CreateField(ctx context.Context, field *model.MetaField)
 	_, err := r.db.conn.ExecContext(ctx, query,
 		field.FieldName, field.Description, field.FieldType, native)
 	if err != nil {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) &&
+			(sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey ||
+				sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique) {
+			return model.ErrMetaFieldExists
+		}
 		return fmt.Errorf("create meta field: %w", err)
 	}
 	return nil

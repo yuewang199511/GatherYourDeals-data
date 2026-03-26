@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -194,8 +195,8 @@ func TestAuth_TamperedClaims(t *testing.T) {
 
 	// The original service should reject the attacker's token
 	_, err = tokens.ValidateAccessToken(attackerToken)
-	if err == nil {
-		t.Fatal("expected rejection of token signed with wrong secret, got nil")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for attacker token, got %v", err)
 	}
 
 	// And the middleware should reject it too

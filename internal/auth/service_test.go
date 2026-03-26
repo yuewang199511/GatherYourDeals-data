@@ -135,7 +135,7 @@ func TestResetPassword(t *testing.T) {
 	// Old password should fail
 	_, err := svc.Login(ctx, "alice", "oldpassword1")
 	if err != auth.ErrInvalidCredential {
-		t.Fatal("expected old password to fail after reset")
+		t.Fatalf("expected ErrInvalidCredential after password reset, got %v", err)
 	}
 
 	// New password should work
