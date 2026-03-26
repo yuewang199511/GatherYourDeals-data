@@ -23,7 +23,7 @@ Please refer to [docs/service_structure.md](docs/service_structure.md)
 
 ## Code Style
 
-Go 1.25 (as declared in `go.mod`): Follow standard conventions
+Go 1.25 (as declared in `go.mod`): Code must pass `gofmt` and `golangci-lint` (config: `.golangci.yml`). Both run in CI via `.github/workflows/code-quality.yml` and are the authoritative style gate.
 
 ## Recent Changes
 - 007-seed-guardrail-tests: Added Python 3.11 (integration tests); Bash (runner scripts) + pytest ≥ 8.0, requests ≥ 2.31, python-dotenv 1.0.1 — all already in `load_testing/.venv`; no new dependencies required
@@ -84,13 +84,19 @@ If you are reading this at the begining, you are the master agent who will be or
 
 Please scan the subfolders at most 2 levels for other CLAUDE.md for definition of subagents.
 
-Please also revisit the README.md and make sure the operations and deployments methods are valid.
+Please also revisit the README.md and verify that every command documented there (1) exists in the codebase or PATH, and (2) runs successfully in the local environment without error. Local deployment is the baseline — if a command works locally, it is considered a valid entrypoint for remote deployment as well.
 
 If you receive any request that needs to start those subagents defined in this repo, let the user know.
 
-# environment preqrequisites
+# environment prerequisites
 
-Please scan all the CLAUDE.md and make sure the possible commands that needs to be installed with sudo exists! If not, let user install them and try again!
+At the start of any task, verify the following required CLI tools are installed by running `which <tool>` for each:
+- `docker`
+- `gh`
+- `jq`
+- `railway`
+
+If any are missing, stop immediately and tell the user the exact install command. Do not proceed until all four are available.
 
 # Tracing Prerequisites
 
@@ -113,9 +119,12 @@ If any prerequisite is missing, stop and notify the user immediately — do not 
 
 To prevent agents from consuming excessive tokens on dead or failing external calls:
 
-- Any external call returning a non-200 response must be retried at most **3 times**
+- Any external call that fails must be retried at most **3 times**. Failure is defined as:
+  - **HTTP**: 4xx or 5xx response code
+  - **MCP tool call**: tool returns an error result
+  - **Bash/CLI tool**: non-zero exit code
 - If all 3 retries fail, stop and report to the user immediately — do not continue
-- Non-retryable responses (401, 403, 404) must not be retried at all — stop and report immediately
+- Non-retryable failures (HTTP 401, 403, 404; MCP auth errors; CLI "not found" errors) must not be retried at all — stop and report immediately
 - Do not loop on the same failing endpoint in search of a different result
 - If a tool or endpoint is unavailable, treat it as a blocked state and follow the Stop / Blocked rule below
 
@@ -167,9 +176,7 @@ Each agent's CLAUDE.md defines its own extension fields.
 
 # auto code optimization after every change
 
-After completing every spec implementation (i.e., after running `/speckit.implement`), or any code changes run `/simplify` to review the changed code for reuse, quality, and efficiency issues and fix them.
-
-Let subagents do this work, not you.
+After completing any code changes, the implementing subagent must run `/simplify` on its own changes before reporting back to the master agent. The master agent does not run `/simplify` itself.
 
 # permision
 

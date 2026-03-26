@@ -60,11 +60,14 @@ Include the environment in your report extension.
    - **Unexpected failures** (any 5xx, or a 4xx that makes no logical sense given the request) — these require deeper investigation. Query Honeycomb filtered by `test.run_id = {test_run_id}` to get the internal trace. Only do this if `OTEL_EXPORTER_OTLP_HEADERS` is set in root `.env`.
 
 5. Determine if the issue is in test code (your edit scope) or service code (outside scope).
-   - Test code issue: propose fix, wait for user approval, then fix.
-   - Service code issue: do not touch service files. Report to master using the Service Bug extension format below.
+   - **Test code issue:**
+     1. Investigate all log sources in order: cloud provider logs (e.g. Railway, Azure) → CI logs → source code
+     2. Propose a fix plan and report to the user — wait for explicit approval before making any changes
+     3. Once approved, execute the plan autonomously. You may self-correct minor issues discovered during iteration without re-escalating
+     4. Rerun the tests to verify the fix. If the bug still exists and the approved plan is exhausted, stop and re-escalate with a new strategy proposal — do not retry indefinitely
+   - **Service code issue:** do not touch service files. Report to master using the Service Bug extension format below.
 
-6. Submit report using `docs/testing/report_format.md` skeleton.
-   Use `docs/testing_reports/integration/template.md` as the full report template.
+6. Submit report using `docs/testing/report_format.md` as the required skeleton — all sections defined there are mandatory. Use `docs/testing_reports/integration/template.md` as the content guide for how to fill in each section for integration tests specifically.
 
 # Report Extension
 

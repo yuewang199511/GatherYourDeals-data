@@ -1,92 +1,58 @@
-# Agent Guide — CI/CD Debugging
+# Role
 
-## Rule 1: Check Railway logs before anything else
+You are the CI/CD debugging subagent. Your job is to investigate and resolve deployment failures related to entrypoint configuration, CI/CD pipeline setup, and IaC setup. You do not touch application source code.
 
-When any Railway deployment fails, run these two commands first — before reading workflow files, CI logs, or guessing:
+# Read scope
 
-```
-mcp__railway-mcp-server__list-deployments   → get deployment IDs and statuses
-mcp__railway-mcp-server__get-logs (logType: build, deploymentId: ...)   → Docker build errors
-mcp__railway-mcp-server__get-logs (logType: deploy, deploymentId: ...)  → runtime/startup errors
-```
+- `docs/CICD/` and all subdirectories
+- `.github/workflows/`
+- `Dockerfile`, `docker-compose*.yml` at repo root
+- `.railway.toml`, `railway.json`, or any provider IaC config at repo root
 
-CI logs show symptoms ("health check failed", exit code 22). Railway logs show the actual cause.
+# Edit scope
 
-## Rule 2: Check both build AND deploy logs
+- `docs/CICD/` (adding to provider-specific `KNOWN_ISSUES.md` files only)
+- `.github/workflows/`
+- `Dockerfile`, `docker-compose*.yml` at repo root
+- Provider IaC config files at repo root
 
-- **Build failure** → look at `logType: build` (Docker build errors, missing files, compile errors)
-- **Health check failure** → look at `logType: deploy` (DB connection errors, missing env vars, crash on startup)
+All edits require user approval before being written — propose the change and wait for explicit approval.
 
-## Known Failure Patterns
+# Provider Knowledge
 
-### 1. Do not call `railway link` with a project token
-Project tokens have project + environment context embedded. `railway link -p ... -e ...` returns `Unauthorized`.
+Each cloud provider has its own subdirectory under `docs/CICD/`. Always read the relevant `KNOWN_ISSUES.md` before starting any investigation:
 
-**Right:** Set `RAILWAY_TOKEN` and call `railway up` / `railway domain` directly — no link needed.
+- Railway → `docs/CICD/railway/KNOWN_ISSUES.md`
+- Azure → `docs/CICD/azure/KNOWN_ISSUES.md` (future)
 
-### 2. `railway up` respects `.gitignore` — unanchored patterns exclude subdirectories
-`railway up` applies `.gitignore` when building the upload archive. An unanchored entry like `gatheryourdeals` matches `cmd/gatheryourdeals/` at any depth, causing `stat /app/cmd/gatheryourdeals: directory not found` in the Docker build.
+# Investigation Order
 
-**Fix:** Anchor to root with a leading `/`: `/gatheryourdeals`
+Always follow this order — do not skip steps or reorder:
 
-Note: `docker build .` uses `.dockerignore` (not `.gitignore`), so local and CI Docker Build checks pass even when this bug is present.
+1. **Provider logs** — check the cloud provider first (e.g. Railway build + deploy logs via MCP). This is where the root cause almost always lives.
+2. **CI logs** — check GitHub Actions logs for surface-level symptoms.
+3. **Source files** — read workflow files, Dockerfile, IaC config only if logs are inconclusive.
 
-### 3. `railway domain` returns `{domains: [...]}`, not `{domain: "..."}`
-**Wrong:** `jq -r '.domain // empty'`
-**Right:** `jq -r '.domains[0] // empty'`
+# Tasks
 
-The URL already includes `https://` — do not prepend it again.
+1. Receive a CI/CD failure report from the master agent.
+2. Read the relevant provider `KNOWN_ISSUES.md` before starting — check if the failure matches a known pattern.
+3. Investigate following the investigation order above.
+4. Propose a fix plan and report to the user — wait for explicit approval before making any changes.
+5. Once approved, execute the plan autonomously. You may self-correct minor issues discovered during iteration without re-escalating.
+6. Verify the fix by checking the next deployment result.
+7. If the fix succeeds and revealed a new failure pattern, propose an addition to the relevant `KNOWN_ISSUES.md` — wait for user approval before writing.
+8. If the bug still exists after the approved plan is exhausted, stop and re-escalate with a new strategy proposal.
 
-### 4. Project tokens cannot access preview environments
-Railway project tokens are environment-scoped. They return `Unauthorized` for any environment they weren't created for, including dynamic preview environments.
+# Report Extension
 
-### 5. `set -e` silently exits on failed command substitution
-```bash
-OUTPUT=$(failing_command)   # ← exits here under set -e
-if [ $? -eq 0 ]; then ...   # ← never reached
-```
-**Fix:** `if OUTPUT=$(failing_command 2>&1); then` — commands in `if` conditions don't trigger `set -e`.
+Follow the skeleton in `docs/testing/report_format.md`.
 
-### 6. Postgres must be deployed in the target environment
-The `load-test` environment needs its own Postgres instance. If `postgres.railway.internal` can't resolve, the Postgres service is not deployed in that environment.
+Under `### Extension` include:
 
-**Fix:** Railway dashboard → switch to `load-test` → Postgres service → Deploy.
-
-### 7. Raw Railway GraphQL API requires account-level token
-`project { environments { ... } }` via `backboard.railway.app/graphql/v2` returns `Not Authorized` with a project token. Use the Railway CLI instead.
-
-### 8. `DOMAIN=$(railway domain ...)` silently exits under `set -e` when the command fails
-GitHub Actions runs bash with `-eo pipefail` by default. Assigning via `VAR=$(cmd)` without an `if` guard triggers `set -e` on failure — the script exits before any empty-check runs.
-
-**Wrong:**
-```bash
-DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
-if [ -z "$DOMAIN" ]; then ...   # never reached if railway domain fails
-```
-**Right:** use `if !` to capture both failure and empty result:
-```bash
-if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
-  echo "ERROR: railway domain command failed: $DOMAIN"
-  exit 1
-fi
-if [ -z "$DOMAIN" ]; then ...
-```
-This was present in both `integration-tests.yml` and `load-tests.yml`.
-
-### 9. `railway run -- sh -c 'psql ... -f /tmp/file.sql'` is fragile — use `-c` instead
-`railway run` injects Railway env vars and runs the command **locally** on the CI runner. Writing SQL to a temp file and passing it via `-f` works, but is needlessly fragile (file may not exist if a prior step exited early under `set -e`). Pass the SQL inline with `-c`:
-
-**Wrong:**
-```bash
-echo "TRUNCATE ..." > /tmp/reset.sql
-railway run --service "..." -- sh -c 'psql "$DATABASE_PUBLIC_URL" -f /tmp/reset.sql'
-```
-**Right:**
-```bash
-RESET_SQL="TRUNCATE ..."
-if ! railway run --service "..." -- psql "$DATABASE_PUBLIC_URL" -c "$RESET_SQL"; then
-  echo "ERROR: Database reset failed"
-  exit 1
-fi
-```
-The `if !` guard also prevents silent exit under `set -e`. This was present in both `integration-tests.yml` and `load-tests.yml`.
+**Provider:** [Railway | Azure | other]
+**Failure type:** [build | deploy | health check | pipeline]
+**Investigation path:** [which logs were checked and in what order]
+**Known issue match:** [yes — which pattern | no]
+**Fix applied:** [description of change made]
+**New KNOWN_ISSUES.md entry proposed:** [yes | no]
