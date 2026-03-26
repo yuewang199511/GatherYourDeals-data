@@ -12,69 +12,13 @@ jobs:
     timeout-minutes: 15
 
     # Serialize post-merge runs so concurrent merges don't race on the load-test env.
-    # PR runs are independent (each has its own preview env) so they are not queued.
+    # PR runs are independent (local) so they are not queued.
     concurrency:
       group: ${{ github.event_name == 'push' && 'post-merge-develop' || format('pr-{0}', github.event.pull_request.number) }}
       cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Resolve target URL
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
-
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "Post-merge run — deploying to load-test environment..."
-            ENV_NAME="load-test"
-          else
-            ENV_NAME="${{ github.head_ref }}"
-            echo "Pre-merge run — targeting preview environment '$ENV_NAME'..."
-          fi
-
-          # Retry: preview envs may still be provisioning when this job starts
-          # Use `if command` form so set -e doesn't exit on expected failures
-          LINKED=false
-          for attempt in $(seq 1 20); do
-            if OUTPUT=$(railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "GatherYourDeals-data" 2>&1); then
-              LINKED=true
-              break
-            fi
-            echo "Attempt $attempt/20 failed: $OUTPUT"
-            echo "Waiting 15s..."
-            sleep 15
-          done
-
-          if [ "$LINKED" = "false" ]; then
-            echo "ERROR: Could not link to environment '$ENV_NAME' after 20 attempts."
-            exit 1
-          fi
-
-          if [ "${{ github.event_name }}" = "push" ]; then
-            railway up --detach
-          fi
-
-          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domain // empty')
-          if [ -z "$DOMAIN" ]; then
-            echo "ERROR: Could not get domain for environment '$ENV_NAME'."
-            echo "railway domain output: $(railway domain -s 'GatherYourDeals-data' --json 2>&1)"
-            exit 1
-          fi
-
-          TARGET_URL="https://${DOMAIN}"
-          echo "TARGET_URL=$TARGET_URL" >> $GITHUB_ENV
-          echo "Target URL: $TARGET_URL"
-
-      - name: Wait for service to be healthy
-        run: |
-          echo "Polling $TARGET_URL/health ..."
-          curl --retry 30 --retry-delay 10 --retry-connrefused \
-               --retry-max-time 300 -sf "$TARGET_URL/health"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -84,7 +28,92 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
-      - name: Run integration tests
+      # -----------------------------------------------------------------------
+      # PRE-MERGE: build and run locally (no Railway token needed)
+      # -----------------------------------------------------------------------
+      - name: Set up Go
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        if: github.event_name == 'pull_request'
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o gatheryourdeals ./cmd/gatheryourdeals
+
+      - name: Initialise database
+        if: github.event_name == 'pull_request'
+        env:
+          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+        run: |
+          printf '%s\n%s\n%s\n' \
+            "${{ secrets.GYD_ADMIN_USERNAME }}" \
+            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
+            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
+            | ./gatheryourdeals init
+
+      - name: Start server
+        if: github.event_name == 'pull_request'
+        env:
+          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+        run: ./gatheryourdeals serve &
+
+      - name: Wait for local server to be healthy
+        if: github.event_name == 'pull_request'
+        run: |
+          curl --retry 15 --retry-delay 1 --retry-connrefused \
+               -sf http://localhost:8080/health
+
+      - name: Run integration tests (pre-merge, local)
+        if: github.event_name == 'pull_request'
+        env:
+          GYD_TARGET_URL: http://localhost:8080
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_TEST_RUN_ID: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
+        run: |
+          cd load_testing
+          python3 -m pytest integration/ -v
+
+      # -----------------------------------------------------------------------
+      # POST-MERGE: deploy to Railway load-test and test there
+      # -----------------------------------------------------------------------
+      - name: Install Railway CLI
+        if: github.event_name == 'push'
+        run: npm install -g @railway/cli
+
+      - name: Deploy to load-test and resolve URL
+        if: github.event_name == 'push'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway link -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
+                       -e "load-test" \
+                       -s "GatherYourDeals-data"
+          railway up --detach
+
+          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domain // empty')
+          if [ -z "$DOMAIN" ]; then
+            echo "ERROR: Could not get domain for load-test environment."
+            echo "railway domain output: $(railway domain -s 'GatherYourDeals-data' --json 2>&1)"
+            exit 1
+          fi
+
+          echo "TARGET_URL=https://${DOMAIN}" >> $GITHUB_ENV
+          echo "Target URL: https://${DOMAIN}"
+
+      - name: Wait for load-test service to be healthy
+        if: github.event_name == 'push'
+        run: |
+          curl --retry 30 --retry-delay 10 --retry-connrefused \
+               --retry-max-time 300 -sf "$TARGET_URL/health"
+
+      - name: Run integration tests (post-merge, Railway)
+        if: github.event_name == 'push'
         env:
           GYD_TARGET_URL: ${{ env.TARGET_URL || '' }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
