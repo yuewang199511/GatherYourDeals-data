@@ -36,8 +36,8 @@ jobs:
             exit 1
           fi
 
-          echo "TARGET_URL=https://${DOMAIN}" >> $GITHUB_ENV
-          echo "Target URL: https://${DOMAIN}"
+          echo "TARGET_URL=${DOMAIN}" >> $GITHUB_ENV
+          echo "Target URL: ${DOMAIN}"
 
       - name: Wait for service to be healthy
         run: |

@@ -40,7 +40,7 @@ jobs:
             exit 1
           fi
 
-          LOAD_TEST_URL="https://${DOMAIN}"
+          LOAD_TEST_URL="${DOMAIN}"
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
 
