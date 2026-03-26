@@ -6,11 +6,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const bcryptCost = 12
+// BcryptCost is the work factor for bcrypt. Tests override this with bcrypt.MinCost.
+var BcryptCost = 12
 
 // HashPassword hashes a plaintext password using bcrypt.
 func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
 	}

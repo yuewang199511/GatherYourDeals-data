@@ -72,10 +72,18 @@ if ! curl -sf --max-time 10 "${GYD_TARGET_URL}/health" -o /dev/null 2>/dev/null;
 fi
 log "Service is reachable."
 
+# ── Resolve Python interpreter ────────────────────────────────────────────────
+
+if [ -x "$SCRIPT_DIR/.venv/bin/python3" ]; then
+    PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+else
+    PYTHON="python3"
+fi
+
 # ── Run integration guardrail checks ──────────────────────────────────────────
 
 log "Running guardrail checks (health, login, list-receipts) ..."
-if "$SCRIPT_DIR/.venv/bin/python3" -m pytest integration/ \
+if "$PYTHON" -m pytest integration/ \
     -k "test_health or test_login_success or test_list_receipts_success" \
     -v; then
     log "Integration checks passed."
@@ -87,7 +95,7 @@ fi
 # ── Check seed receipt count ───────────────────────────────────────────────────
 
 log "Checking seed receipt count ..."
-if "$SCRIPT_DIR/.venv/bin/python3" check_seed.py; then
+if "$PYTHON" check_seed.py; then
     log "Guardrail passed — seed state is valid."
 else
     err "Seed check failed — re-seed the database before running load tests."
