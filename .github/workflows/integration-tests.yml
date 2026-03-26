@@ -52,6 +52,13 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
+      - name: Reset database
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway run --service "GatherYourDeals-data" psql "$DATABASE_URL" -c \
+            "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+
       - name: Run integration tests
         env:
           GYD_TARGET_URL: ${{ env.TARGET_URL || '' }}
