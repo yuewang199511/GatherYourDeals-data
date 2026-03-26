@@ -11,83 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Serialize post-merge runs so concurrent merges don't race on the load-test env.
-    # PR runs are independent (local) so they are not queued.
+    # All runs share the load-test Railway environment — serialize to prevent
+    # concurrent deploys and test data conflicts.
     concurrency:
-      group: ${{ github.event_name == 'push' && 'post-merge-develop' || format('pr-{0}', github.event.pull_request.number) }}
+      group: load-test-env
       cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install test dependencies
-        run: pip install -r load_testing/requirements.txt
-
-      # -----------------------------------------------------------------------
-      # PRE-MERGE: build and run locally (no Railway token needed)
-      # -----------------------------------------------------------------------
-      - name: Set up Go
-        if: github.event_name == 'pull_request'
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Build binary
-        if: github.event_name == 'pull_request'
-        env:
-          CGO_ENABLED: "1"
-        run: go build -o gatheryourdeals ./cmd/gatheryourdeals
-
-      - name: Initialise database
-        if: github.event_name == 'pull_request'
-        env:
-          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
-        run: |
-          printf '%s\n%s\n%s\n' \
-            "${{ secrets.GYD_ADMIN_USERNAME }}" \
-            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
-            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
-            | ./gatheryourdeals init
-
-      - name: Start server
-        if: github.event_name == 'pull_request'
-        env:
-          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
-        run: ./gatheryourdeals serve &
-
-      - name: Wait for local server to be healthy
-        if: github.event_name == 'pull_request'
-        run: |
-          curl --retry 15 --retry-delay 1 --retry-connrefused \
-               -sf http://localhost:8080/health
-
-      - name: Run integration tests (pre-merge, local)
-        if: github.event_name == 'pull_request'
-        env:
-          GYD_TARGET_URL: http://localhost:8080
-          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
-          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
-          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
-          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
-          GYD_TEST_RUN_ID: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
-        run: |
-          cd load_testing
-          python3 -m pytest integration/ -v
-
-      # -----------------------------------------------------------------------
-      # POST-MERGE: deploy to Railway load-test and test there
-      # -----------------------------------------------------------------------
       - name: Install Railway CLI
-        if: github.event_name == 'push'
         run: npm install -g @railway/cli
 
       - name: Deploy to load-test and resolve URL
-        if: github.event_name == 'push'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -106,14 +42,20 @@ jobs:
           echo "TARGET_URL=https://${DOMAIN}" >> $GITHUB_ENV
           echo "Target URL: https://${DOMAIN}"
 
-      - name: Wait for load-test service to be healthy
-        if: github.event_name == 'push'
+      - name: Wait for service to be healthy
         run: |
           curl --retry 30 --retry-delay 10 --retry-connrefused \
                --retry-max-time 300 -sf "$TARGET_URL/health"
 
-      - name: Run integration tests (post-merge, Railway)
-        if: github.event_name == 'push'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install -r load_testing/requirements.txt
+
+      - name: Run integration tests
         env:
           GYD_TARGET_URL: ${{ env.TARGET_URL || '' }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
