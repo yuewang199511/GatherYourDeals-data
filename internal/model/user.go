@@ -8,6 +8,9 @@ var ErrInvalidToken = errors.New("invalid or expired token")
 // ErrNotFound is returned when a requested resource does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrUserExists is returned when trying to create a user with a username that is already taken.
+var ErrUserExists = errors.New("user already exists")
+
 // Role represents the authorization level of a user.
 type Role string
 
