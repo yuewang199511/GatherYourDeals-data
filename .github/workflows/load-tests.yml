@@ -23,9 +23,9 @@ on:
           - "3"
           - "4"
       phase:
-        description: "Phase to run — ignored when group is 'all'"
+        description: "Load test phase (ignored when group is 'all')"
         required: true
-        default: "all"
+        default: "moderate"
         type: choice
         options:
           - all
@@ -35,7 +35,11 @@ on:
 jobs:
   load-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+
+    permissions:
+      id-token: write  # required for Azure OIDC
+      contents: read
 
     concurrency:
       group: load-test-env
@@ -44,43 +48,146 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ── Railway ──────────────────────────────────────────────────────────────
       - name: Install Railway CLI
         if: inputs.provider == 'railway'
         run: npm install -g @railway/cli
 
-      - name: Deploy and resolve load-test URL (Railway)
+      - name: Deploy develop to load-test environment (Railway)
         if: inputs.provider == 'railway'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway up --service "GatherYourDeals-data"
+          railway link "7639518c-e0a7-4cd4-8227-6c2575458620"
+          railway environment "load-test"
+          railway service "GatherYourDeals-data"
+          railway up --detach
+          echo "Deployment triggered. Waiting for health check..."
 
-          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
-          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
-            echo "ERROR: railway domain command failed:"
-            echo "$DOMAIN"
-            exit 1
-          fi
+      - name: Resolve load-test URL (Railway)
+        if: inputs.provider == 'railway'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
+          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
+
+          ENV_RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg pid "$PROJECT_ID" \
+              '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
+            https://backboard.railway.app/graphql/v2)
+
+          ENV_ID=$(echo "$ENV_RESP" | jq -r \
+            '.data.project.environments.edges[] | select(.node.name == "load-test") | .node.id')
+
+          DOMAIN_RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
+              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
+            https://backboard.railway.app/graphql/v2)
+
+          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
+            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
+
           if [ -z "$DOMAIN" ]; then
-            echo "ERROR: Could not get domain for load-test environment."
-            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
+            echo "ERROR: No public domain found for load-test environment."
             exit 1
           fi
 
-          LOAD_TEST_URL="${DOMAIN}"
+          LOAD_TEST_URL="https://${DOMAIN}"
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
 
-      - name: Deploy and resolve load-test URL (Azure)
+      # ── Azure ─────────────────────────────────────────────────────────────────
+      - name: Azure login (OIDC)
+        if: inputs.provider == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Provision Azure infra (RG + ACR + PostgreSQL)
+        if: inputs.provider == 'azure'
+        env:
+          TF_VAR_run_id: ${{ github.run_id }}
+          TF_VAR_pg_admin_password: ${{ secrets.AZURE_PG_ADMIN_PASSWORD }}
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          cd infra/azure
+          terraform init
+          terraform apply -auto-approve
+
+          ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+          ACR_NAME=$(terraform output -raw acr_name)
+          PG_FQDN=$(terraform output -raw postgresql_fqdn)
+          RESOURCE_GROUP=$(terraform output -raw resource_group_name)
+          LOCATION=$(terraform output -raw location)
+
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          echo "AZ_RESOURCE_GROUP=$RESOURCE_GROUP" >> $GITHUB_ENV
+          echo "AZ_LOCATION=$LOCATION" >> $GITHUB_ENV
+          AZ_DATABASE_URL="postgres://gydadmin:${{ secrets.AZURE_PG_ADMIN_PASSWORD }}@${PG_FQDN}:5432/gatheryourdeals?sslmode=require"
+          echo "AZ_DATABASE_URL=$AZ_DATABASE_URL" >> $GITHUB_ENV
+
+      - name: Build and push image to ACR
         if: inputs.provider == 'azure'
         run: |
-          echo "ERROR: Azure provider not yet implemented"
-          exit 1
+          # az acr build runs the Docker build inside Azure — no local Docker daemon needed
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "gatheryourdeals:${{ github.sha }}" \
+            --file Dockerfile \
+            .
 
+      - name: Deploy app to Azure Container Instance
+        if: inputs.provider == 'azure'
+        run: |
+          ACR_ADMIN_PASSWORD=$(az acr credential show \
+            --name "$ACR_NAME" \
+            --query "passwords[0].value" -o tsv)
+
+          az container create \
+            --resource-group "$AZ_RESOURCE_GROUP" \
+            --name "gyd-lt-${{ github.run_id }}" \
+            --image "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
+            --registry-login-server "$ACR_LOGIN_SERVER" \
+            --registry-username "$ACR_NAME" \
+            --registry-password "$ACR_ADMIN_PASSWORD" \
+            --cpu 2 --memory 4 \
+            --ports 8080 \
+            --dns-name-label "gyd-lt-${{ github.run_id }}" \
+            --ip-address Public \
+            --os-type Linux \
+            --location "$AZ_LOCATION" \
+            --environment-variables \
+              GYD_DATABASE_DRIVER=postgres \
+              GYD_ADMIN_USERNAME="${{ secrets.GYD_ADMIN_USERNAME }}" \
+              OTEL_SERVICE_NAME=gatheryourdeals \
+            --secure-environment-variables \
+              DATABASE_URL="$AZ_DATABASE_URL" \
+              GYD_ADMIN_PASSWORD="${{ secrets.GYD_ADMIN_PASSWORD }}" \
+              GYD_JWT_SECRET="${{ secrets.GYD_JWT_SECRET }}" \
+              OTEL_EXPORTER_OTLP_HEADERS="${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" \
+            --restart-policy Always \
+            --no-wait
+
+          ACI_FQDN="gyd-lt-${{ github.run_id }}.${AZ_LOCATION}.azurecontainer.io"
+          echo "LOAD_TEST_URL=http://${ACI_FQDN}:8080" >> $GITHUB_ENV
+          echo "ACI deployed: http://${ACI_FQDN}:8080"
+
+      # ── Provider-agnostic ──────────────────────────────────────────────────────
       - name: Wait for load-test service to be healthy
         run: |
           echo "Polling $LOAD_TEST_URL/health ..."
-          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
+          curl --retry 30 --retry-delay 10 --retry-connrefused \
                --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
 
       - name: Set up Python
@@ -101,24 +208,27 @@ jobs:
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
-          # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment
-          if ! DB_URL=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
-            echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
-            exit 1
-          fi
-          # Step 2: run psql directly with the resolved URL
-          if ! psql "$DB_URL" -c "$RESET_SQL"; then
-            echo "ERROR: Database reset failed"
-            exit 1
-          fi
+          railway link "7639518c-e0a7-4cd4-8227-6c2575458620"
+          railway environment "load-test"
+          railway service "GatherYourDeals-data"
+          railway run psql "$DATABASE_URL" -c \
+            "TRUNCATE receipts CASCADE; DELETE FROM users WHERE role != 'admin';"
           cd load_testing && python3 seed.py
 
       - name: Reset and seed load-test database (Azure)
         if: inputs.provider == 'azure'
+        env:
+          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          echo "ERROR: Azure provider not yet implemented"
-          exit 1
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # psql is pre-installed on ubuntu-latest; AZ_DATABASE_URL is set in the provision step
+          if ! psql "$AZ_DATABASE_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
+          cd load_testing && python3 seed.py
 
       - name: Run load tests
         env:
@@ -127,6 +237,7 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_PHASE: ${{ inputs.phase }}
           GYD_PLATFORM_NAME: ${{ inputs.provider }}
           GYD_DB_TYPE: postgres
           GYD_RESULTS_DIR: results
@@ -147,3 +258,24 @@ jobs:
           name: load-test-results-${{ github.run_id }}
           path: load_testing/results/
           retention-days: 30
+
+      # ── Azure teardown (runs even if earlier steps failed) ────────────────────
+      - name: Teardown Azure infra
+        if: always() && inputs.provider == 'azure'
+        env:
+          TF_VAR_run_id: ${{ github.run_id }}
+          TF_VAR_pg_admin_password: ${{ secrets.AZURE_PG_ADMIN_PASSWORD }}
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          cd infra/azure
+          # Terraform destroy removes tracked resources (RG, ACR, PostgreSQL)
+          if [ -f terraform.tfstate ]; then
+            terraform destroy -auto-approve || true
+          fi
+          # Backstop: az group delete cascades to ACI and any orphaned resources
+          az group delete \
+            --name "gyd-lt-${{ github.run_id }}" \
+            --yes --no-wait 2>/dev/null || true
