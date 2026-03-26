@@ -1,0 +1,19 @@
+name: Protect Main
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require source branch to be develop
+        run: |
+          SOURCE="${{ github.head_ref }}"
+          if [ "$SOURCE" != "develop" ]; then
+            echo "ERROR: Pull requests to main must come from 'develop', not '$SOURCE'."
+            echo "Merge your changes into develop first, then open a PR from develop → main."
+            exit 1
+          fi
+          echo "Source branch is 'develop'. OK."

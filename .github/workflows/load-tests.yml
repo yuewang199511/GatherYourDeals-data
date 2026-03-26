@@ -1,0 +1,130 @@
+name: Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Load test phase"
+        required: true
+        default: "moderate"
+        type: choice
+        options:
+          - moderate
+          - stress
+      seed_db:
+        description: "Seed the load-test database before running (required on first run or after DB reset)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    concurrency:
+      group: load-test-env
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy develop to load-test environment
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway link "7639518c-e0a7-4cd4-8227-6c2575458620"
+          railway environment "load-test"
+          railway service "GatherYourDeals-data"
+          railway up --detach
+          echo "Deployment triggered. Waiting for health check..."
+
+      - name: Resolve load-test URL
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
+          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
+
+          ENV_RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg pid "$PROJECT_ID" \
+              '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
+            https://backboard.railway.app/graphql/v2)
+
+          ENV_ID=$(echo "$ENV_RESP" | jq -r \
+            '.data.project.environments.edges[] | select(.node.name == "load-test") | .node.id')
+
+          DOMAIN_RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
+              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
+            https://backboard.railway.app/graphql/v2)
+
+          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
+            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
+
+          if [ -z "$DOMAIN" ]; then
+            echo "ERROR: No public domain found for load-test environment."
+            exit 1
+          fi
+
+          LOAD_TEST_URL="https://${DOMAIN}"
+          echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
+          echo "Load-test URL: $LOAD_TEST_URL"
+
+      - name: Wait for load-test service to be healthy
+        run: |
+          echo "Polling $LOAD_TEST_URL/health ..."
+          curl --retry 30 --retry-delay 10 --retry-connrefused \
+               --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install -r load_testing/requirements.txt
+
+      - name: Seed load-test database
+        if: ${{ inputs.seed_db == true }}
+        env:
+          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+        run: |
+          cd load_testing
+          python3 seed.py
+
+      - name: Run load tests
+        env:
+          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_PHASE: ${{ inputs.phase }}
+          GYD_PLATFORM_NAME: railway
+          GYD_DB_TYPE: postgres
+          GYD_RESULTS_DIR: results
+          HONEYCOMB_API_KEY: ${{ secrets.HONEYCOMB_API_KEY }}
+        run: |
+          cd load_testing
+          mkdir -p results
+          ./run_all.sh
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ github.run_id }}
+          path: load_testing/results/
+          retention-days: 30

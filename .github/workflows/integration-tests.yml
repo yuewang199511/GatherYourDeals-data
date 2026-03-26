@@ -1,47 +1,102 @@
 name: Integration Tests
 
 on:
-  push:
-    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ develop ]
+  push:
+    branches: [ develop ]
 
 jobs:
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Serialize post-merge runs so concurrent merges don't race on the load-test env.
+    # PR runs are independent (each has its own preview env) so they are not queued.
+    concurrency:
+      group: ${{ github.event_name == 'push' && 'post-merge-develop' || format('pr-{0}', github.event.pull_request.number) }}
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
 
-      - name: Build binary
+      - name: Resolve target URL
         env:
-          CGO_ENABLED: "1"
-        run: go build -o gatheryourdeals ./cmd/gatheryourdeals
-
-      - name: Initialise database and create admin account
-        env:
-          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          printf '%s\n%s\n%s\n' \
-            "${{ secrets.GYD_ADMIN_USERNAME }}" \
-            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
-            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
-            | ./gatheryourdeals init
+          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
+          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
 
-      - name: Start server
-        env:
-          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
-        run: ./gatheryourdeals serve &
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Post-merge: deploy develop to the persistent load-test environment and test there.
+            echo "Post-merge run — deploying to load-test environment..."
 
-      - name: Wait for server to be ready
+            railway link "$PROJECT_ID"
+            railway environment "load-test"
+            railway service "GatherYourDeals-data"
+            railway up --detach
+
+            # Resolve the load-test environment ID to get the domain
+            ENV_NAME="load-test"
+          else
+            # Pre-merge: use the Railway preview environment for this PR branch.
+            ENV_NAME="${{ github.head_ref }}"
+            echo "Pre-merge run — targeting preview environment '$ENV_NAME'..."
+          fi
+
+          # Retry loop: preview envs may still be provisioning when this job starts
+          for attempt in $(seq 1 20); do
+            ENV_RESP=$(curl -sf -X POST \
+              -H "Authorization: Bearer $RAILWAY_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg pid "$PROJECT_ID" \
+                '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
+              https://backboard.railway.app/graphql/v2)
+
+            ENV_ID=$(echo "$ENV_RESP" | jq -r \
+              --arg name "$ENV_NAME" \
+              '.data.project.environments.edges[] | select(.node.name == $name) | .node.id')
+
+            if [ -n "$ENV_ID" ] && [ "$ENV_ID" != "null" ]; then
+              break
+            fi
+            echo "Environment '$ENV_NAME' not ready yet (attempt $attempt/20) — waiting 15s..."
+            sleep 15
+          done
+
+          if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+            echo "ERROR: Environment '$ENV_NAME' not found after retries."
+            exit 1
+          fi
+
+          # Get the public domain for the service in this environment
+          DOMAIN_RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
+              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
+            https://backboard.railway.app/graphql/v2)
+
+          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
+            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
+
+          if [ -z "$DOMAIN" ]; then
+            echo "ERROR: No public domain found for service in environment '$ENV_NAME'."
+            exit 1
+          fi
+
+          TARGET_URL="https://${DOMAIN}"
+          echo "TARGET_URL=$TARGET_URL" >> $GITHUB_ENV
+          echo "Target URL: $TARGET_URL"
+
+      - name: Wait for service to be healthy
         run: |
-          curl --retry 15 --retry-delay 1 --retry-connrefused \
-               -sf http://localhost:8080/health
+          echo "Polling $TARGET_URL/health ..."
+          curl --retry 30 --retry-delay 10 --retry-connrefused \
+               --retry-max-time 300 -sf "$TARGET_URL/health"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,21 +106,9 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
-      - name: Debug secret lengths
-        env:
-          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
-          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
-          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
-          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
-        run: |
-          echo "GYD_TEST_USERNAME  length: ${#GYD_TEST_USERNAME}"
-          echo "GYD_TEST_PASSWORD  length: ${#GYD_TEST_PASSWORD}"
-          echo "GYD_ADMIN_USERNAME length: ${#GYD_ADMIN_USERNAME}"
-          echo "GYD_ADMIN_PASSWORD length: ${#GYD_ADMIN_PASSWORD}"
-
       - name: Run integration tests
         env:
-          GYD_TARGET_URL: http://localhost:8080
+          GYD_TARGET_URL: ${{ env.TARGET_URL || '' }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
