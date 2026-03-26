@@ -37,26 +37,23 @@ jobs:
             echo "Pre-merge run — targeting preview environment '$ENV_NAME'..."
           fi
 
-          railway link "$PROJECT_ID"
-
           # Retry: preview envs may still be provisioning when this job starts
           for attempt in $(seq 1 20); do
-            if railway environment "$ENV_NAME" 2>/dev/null; then
+            if railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "GatherYourDeals-data" 2>/dev/null; then
               break
             fi
             echo "Environment '$ENV_NAME' not ready yet (attempt $attempt/20) — waiting 15s..."
             sleep 15
           done
 
-          railway service "GatherYourDeals-data"
-
           if [ "${{ github.event_name }}" = "push" ]; then
             railway up --detach
           fi
 
-          DOMAIN=$(railway domain)
+          DOMAIN=$(railway domain --json | jq -r '.domain // empty')
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: Could not get domain for environment '$ENV_NAME'."
+            echo "railway domain output: $(railway domain --json 2>&1)"
             exit 1
           fi
 
