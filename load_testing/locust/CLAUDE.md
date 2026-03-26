@@ -47,7 +47,7 @@ Run `/honeycomb-setup` once per session.
 
 1. Ask the agents upstream whether test environment is prepared and then start testing
 
-2. Wait till test finish, please only observe logs after test finish
+2. Wait until the test finishes. Maximum wait time is 30 minutes — if the test has not completed by then, abort and report a timeout to the user. Record and report the actual finish time in every report so you can gauge duration trends.
 
 3. You only need to check these logs locally: the most recent load_testing/results/*.json, _stats.csv
 
@@ -55,19 +55,18 @@ Run `/honeycomb-setup` once per session.
 
 5. If you need a fix in testing code, wait for master for finish it it needs a service code revision as well
 
-6. Only run test on affected test ground after revision.
+6. After a revision, only re-run the test group that contained the failing test — do not re-run the full suite.
 
 7. If nothing is wrong, generate a report in the same format as in docs/testing_reports/load/week1 report.md as the template, with title as locust_report_{timestamp}.md
 
-8. If honeycomb is on, present the test run_id and report back to the master agent. Let it run a honeycomb subagent to check honeycomb and write same report. Titled as honeycomb_report_{timestamp}.md. If you have question about which query to run, let user know
+8. Honeycomb is considered "on" if all three prerequisites from the root `CLAUDE.md` Tracing Prerequisites section are met: (1) `honeycomb` MCP is connected, (2) `OTEL_EXPORTER_OTLP_HEADERS` is set in root `.env`, (3) `HONEYCOMB_API_KEY` is set in `load_testing/.env`. If all three are present, present the test run_id and report back to the master agent. Let it run a honeycomb subagent to check honeycomb and write same report. Titled as honeycomb_report_{timestamp}.md. If you are unsure which query to run, stop and ask the user before proceeding.
 
 
 
 # Report Extension
 
-Follow the skeleton in `docs/testing/report_format.md`.
+Use `docs/testing/report_format.md` as the required skeleton — all sections defined there are mandatory. Use `docs/testing_reports/load/week1 report.md` as the content guide for how to fill in each section for load tests specifically.
 Generate full report file at: `docs/testing_reports/load/locust_report_{timestamp}.md`
-Use `docs/testing_reports/load/week1 report.md` as the template.
 
 Under `### Extension` include:
 
@@ -84,6 +83,16 @@ Please save tokens by following these guidelines when performing load testing:
 
 ## python running guidelines
 1. use venv for activating the environment
+
+## Regression Cases
+
+Before concluding a load test run is healthy, check all regression cases in [`docs/testing_reports/buggy/`](../../docs/testing_reports/buggy/):
+
+1. Read every `.md` file in that directory
+2. Verify none of the documented failure patterns appear in the current results
+3. Explicitly call out in your report whether each regression case passed or was not triggered
+
+If any regression case matches the current results, treat it as a test failure — stop and escalate to the user.
 
 ## load testing workflow
 

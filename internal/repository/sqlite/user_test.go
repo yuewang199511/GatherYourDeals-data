@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/gatheryourdeals/data/internal/model"
@@ -61,8 +62,8 @@ func TestCreateUser_DuplicateUsername(t *testing.T) {
 
 	mustCreateUser(t, repo, ctx, user1)
 	err := repo.CreateUser(ctx, user2)
-	if err == nil {
-		t.Fatal("expected error on duplicate username, got nil")
+	if !errors.Is(err, model.ErrUserExists) {
+		t.Fatalf("expected ErrUserExists on duplicate username, got %v", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -133,8 +134,8 @@ func TestValidateAccessToken_RandomString(t *testing.T) {
 	env := newTestTokenEnv(t)
 
 	_, err := env.tokens.ValidateAccessToken("not-a-token")
-	if err == nil {
-		t.Fatal("expected error for random string, got nil")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for random string, got %v", err)
 	}
 }
 
@@ -156,8 +157,8 @@ func TestValidateAccessToken_WrongSecret(t *testing.T) {
 	)
 
 	_, err = otherTokens.ValidateAccessToken(access)
-	if err == nil {
-		t.Fatal("expected error when validating token with wrong secret")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for wrong-secret token, got %v", err)
 	}
 }
 
@@ -178,8 +179,8 @@ func TestValidateAccessToken_Expired(t *testing.T) {
 	}
 
 	_, err = expiredTokens.ValidateAccessToken(access)
-	if err == nil {
-		t.Fatal("expected error for expired token, got nil")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for expired token, got %v", err)
 	}
 }
 
@@ -224,8 +225,8 @@ func TestRefreshAccessToken_OldTokenRevoked(t *testing.T) {
 
 	// Using it again should fail (rotation consumed it)
 	_, _, err = env.tokens.RefreshAccessToken(context.Background(), refresh, env.svc)
-	if err == nil {
-		t.Fatal("expected error reusing a consumed refresh token, got nil")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken reusing consumed refresh token, got %v", err)
 	}
 }
 
@@ -233,8 +234,8 @@ func TestRefreshAccessToken_InvalidToken(t *testing.T) {
 	env := newTestTokenEnv(t)
 
 	_, _, err := env.tokens.RefreshAccessToken(context.Background(), "not-a-real-token", env.svc)
-	if err == nil {
-		t.Fatal("expected error for invalid refresh token, got nil")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for invalid refresh token, got %v", err)
 	}
 }
 
@@ -254,8 +255,8 @@ func TestRevokeRefreshToken_PreventsReuse(t *testing.T) {
 	}
 
 	_, _, err = env.tokens.RefreshAccessToken(context.Background(), refresh, env.svc)
-	if err == nil {
-		t.Fatal("expected error using revoked refresh token, got nil")
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken using revoked refresh token, got %v", err)
 	}
 }
 
@@ -281,8 +282,8 @@ func TestRevokeAllForUser_RevokesAllTokens(t *testing.T) {
 
 	for _, refresh := range refreshTokens {
 		_, _, err := env.tokens.RefreshAccessToken(context.Background(), refresh, env.svc)
-		if err == nil {
-			t.Error("expected error for revoked token, got nil")
+		if !errors.Is(err, auth.ErrInvalidToken) {
+			t.Errorf("expected ErrInvalidToken for revoked token, got %v", err)
 		}
 	}
 }

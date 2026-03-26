@@ -1,0 +1,149 @@
+name: Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Cloud provider to run against"
+        required: true
+        default: "railway"
+        type: choice
+        options:
+          - railway
+          - azure
+      group:
+        description: "Group to run (all = full suite via run_all.sh)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+      phase:
+        description: "Phase to run — ignored when group is 'all'"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - moderate
+          - stress
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    concurrency:
+      group: load-test-env
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        if: inputs.provider == 'railway'
+        run: npm install -g @railway/cli
+
+      - name: Deploy and resolve load-test URL (Railway)
+        if: inputs.provider == 'railway'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up --service "GatherYourDeals-data"
+
+          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
+            exit 1
+          fi
+          if [ -z "$DOMAIN" ]; then
+            echo "ERROR: Could not get domain for load-test environment."
+            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
+            exit 1
+          fi
+
+          LOAD_TEST_URL="${DOMAIN}"
+          echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
+          echo "Load-test URL: $LOAD_TEST_URL"
+
+      - name: Deploy and resolve load-test URL (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          echo "ERROR: Azure provider not yet implemented"
+          exit 1
+
+      - name: Wait for load-test service to be healthy
+        run: |
+          echo "Polling $LOAD_TEST_URL/health ..."
+          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
+               --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install -r load_testing/requirements.txt
+
+      - name: Reset and seed load-test database (Railway)
+        if: inputs.provider == 'railway'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL || '' }}
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+        run: |
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment
+          if ! DB_URL=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
+            echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
+            exit 1
+          fi
+          # Step 2: run psql directly with the resolved URL
+          if ! psql "$DB_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
+          cd load_testing && python3 seed.py
+
+      - name: Reset and seed load-test database (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          echo "ERROR: Azure provider not yet implemented"
+          exit 1
+
+      - name: Run load tests
+        env:
+          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
+          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
+          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_PLATFORM_NAME: ${{ inputs.provider }}
+          GYD_DB_TYPE: postgres
+          GYD_RESULTS_DIR: results
+          HONEYCOMB_API_KEY: ${{ secrets.HONEYCOMB_API_KEY }}
+        run: |
+          cd load_testing
+          mkdir -p results
+          if [ "${{ inputs.group }}" = "all" ]; then
+            ./run_all.sh
+          else
+            ./run_group.sh "${{ inputs.group }}" "${{ inputs.phase }}"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ github.run_id }}
+          path: load_testing/results/
+          retention-days: 30

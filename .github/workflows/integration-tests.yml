@@ -1,47 +1,53 @@
 name: Integration Tests
 
 on:
-  push:
-    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ develop ]
+  push:
+    branches: [ develop ]
 
 jobs:
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # All runs share the load-test Railway environment — serialize to prevent
+    # concurrent deploys and test data conflicts.
+    concurrency:
+      group: load-test-env
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
 
-      - name: Build binary
+      - name: Deploy to load-test and wait for healthy
         env:
-          CGO_ENABLED: "1"
-        run: go build -o gatheryourdeals ./cmd/gatheryourdeals
-
-      - name: Initialise database and create admin account
-        env:
-          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          printf '%s\n%s\n%s\n' \
-            "${{ secrets.GYD_ADMIN_USERNAME }}" \
-            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
-            "${{ secrets.GYD_ADMIN_PASSWORD }}" \
-            | ./gatheryourdeals init
+          railway up --service "GatherYourDeals-data"
 
-      - name: Start server
-        env:
-          GYD_JWT_SECRET: ${{ secrets.GYD_JWT_SECRET }}
-        run: ./gatheryourdeals serve &
+          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
+            exit 1
+          fi
+          if [ -z "$DOMAIN" ]; then
+            echo "ERROR: Could not get domain for load-test environment."
+            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
+            exit 1
+          fi
 
-      - name: Wait for server to be ready
+          echo "TARGET_URL=${DOMAIN}" >> $GITHUB_ENV
+          echo "Target URL: ${DOMAIN}"
+
+      - name: Wait for service to be healthy
         run: |
-          curl --retry 15 --retry-delay 1 --retry-connrefused \
-               -sf http://localhost:8080/health
+          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
+               --retry-max-time 300 -sf "$TARGET_URL/health"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,21 +57,25 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
-      - name: Debug secret lengths
+      - name: Reset database
         env:
-          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
-          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
-          GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
-          GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          echo "GYD_TEST_USERNAME  length: ${#GYD_TEST_USERNAME}"
-          echo "GYD_TEST_PASSWORD  length: ${#GYD_TEST_PASSWORD}"
-          echo "GYD_ADMIN_USERNAME length: ${#GYD_ADMIN_USERNAME}"
-          echo "GYD_ADMIN_PASSWORD length: ${#GYD_ADMIN_PASSWORD}"
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment
+          if ! DB_URL=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
+            echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
+            exit 1
+          fi
+          # Step 2: run psql directly with the resolved URL
+          if ! psql "$DB_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
 
       - name: Run integration tests
         env:
-          GYD_TARGET_URL: http://localhost:8080
+          GYD_TARGET_URL: ${{ env.TARGET_URL || '' }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
