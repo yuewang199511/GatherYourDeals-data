@@ -38,10 +38,10 @@ jobs:
           fi
 
           # Retry: preview envs may still be provisioning when this job starts
+          # Use `if command` form so set -e doesn't exit on expected failures
           LINKED=false
           for attempt in $(seq 1 20); do
-            OUTPUT=$(railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "GatherYourDeals-data" 2>&1)
-            if [ $? -eq 0 ]; then
+            if OUTPUT=$(railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "GatherYourDeals-data" 2>&1); then
               LINKED=true
               break
             fi
