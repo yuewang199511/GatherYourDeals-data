@@ -174,6 +174,9 @@ log "Guardrail passed."
 RUN_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RUN_DIR="${GYD_RESULTS_DIR:-results}/${RUN_TIMESTAMP}"
 mkdir -p "$RUN_DIR"
+# Allow the Locust container (runs as uid 1000) to write results even when
+# the directory was created by a different host user (e.g. CI runner uid 1001).
+chmod a+rwx "$RUN_DIR"
 log "Results directory: ${RUN_DIR}"
 
 # ── Execute ───────────────────────────────────────────────────────────────────
