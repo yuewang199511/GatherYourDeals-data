@@ -11,11 +11,6 @@ on:
         options:
           - moderate
           - stress
-      seed_db:
-        description: "Seed the load-test database before running (required on first run or after DB reset)"
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   load-test:
@@ -92,17 +87,23 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
-      - name: Seed load-test database
-        if: ${{ inputs.seed_db == true }}
+      - name: Check seed state and seed if needed
         env:
-          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
+          GYD_TARGET_URL: ${{ env.LOAD_TEST_URL || '' }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
           cd load_testing
-          python3 seed.py
+          if python3 -m pytest integration/ \
+              -k "test_health or test_login_success or test_list_receipts_success" \
+              -q 2>/dev/null && python3 check_seed.py 2>/dev/null; then
+            echo "Guardrail passed — seed state is valid, skipping seed."
+          else
+            echo "Guardrail failed — seeding the load-test database..."
+            python3 seed.py
+          fi
 
       - name: Run load tests
         env:
