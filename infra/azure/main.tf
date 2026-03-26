@@ -4,7 +4,24 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
+}
+
+# Generates a fresh random password each apply — no secret management needed.
+# The password lives only in Terraform state (ephemeral within the CI job).
+resource "random_password" "pg" {
+  length      = 24
+  special     = true
+  min_upper   = 2
+  min_lower   = 2
+  min_numeric = 2
+  min_special = 2
+  # Azure PostgreSQL disallows these characters in passwords
+  override_special = "!#$%&*+-=?^_"
 }
 
 # Authentication via ARM_CLIENT_ID / ARM_CLIENT_SECRET / ARM_TENANT_ID /
@@ -53,7 +70,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   location               = azurerm_resource_group.main.location
   version                = "16"
   administrator_login    = local.pg_admin
-  administrator_password = var.pg_admin_password
+  administrator_password = random_password.pg.result
 
   # B_Standard_B2ms: 2 vCPU / 4 GB — enough headroom for load test traffic.
   sku_name   = "B_Standard_B2ms"

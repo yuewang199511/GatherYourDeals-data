@@ -28,6 +28,12 @@ output "postgresql_admin_login" {
   value       = azurerm_postgresql_flexible_server.main.administrator_login
 }
 
+output "postgresql_admin_password" {
+  description = "Generated PostgreSQL admin password — ephemeral, lives only in CI job state"
+  value       = random_password.pg.result
+  sensitive   = true
+}
+
 output "postgresql_database" {
   description = "PostgreSQL database name"
   value       = azurerm_postgresql_flexible_server_database.main.name

@@ -9,8 +9,3 @@ variable "location" {
   default     = "eastus"
 }
 
-variable "pg_admin_password" {
-  description = "Password for the PostgreSQL admin account (gydadmin)"
-  type        = string
-  sensitive   = true
-}
