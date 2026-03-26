@@ -38,22 +38,31 @@ jobs:
           fi
 
           # Retry: preview envs may still be provisioning when this job starts
+          LINKED=false
           for attempt in $(seq 1 20); do
-            if railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "GatherYourDeals-data" 2>/dev/null; then
+            OUTPUT=$(railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "GatherYourDeals-data" 2>&1)
+            if [ $? -eq 0 ]; then
+              LINKED=true
               break
             fi
-            echo "Environment '$ENV_NAME' not ready yet (attempt $attempt/20) — waiting 15s..."
+            echo "Attempt $attempt/20 failed: $OUTPUT"
+            echo "Waiting 15s..."
             sleep 15
           done
+
+          if [ "$LINKED" = "false" ]; then
+            echo "ERROR: Could not link to environment '$ENV_NAME' after 20 attempts."
+            exit 1
+          fi
 
           if [ "${{ github.event_name }}" = "push" ]; then
             railway up --detach
           fi
 
-          DOMAIN=$(railway domain --json | jq -r '.domain // empty')
+          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domain // empty')
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: Could not get domain for environment '$ENV_NAME'."
-            echo "railway domain output: $(railway domain --json 2>&1)"
+            echo "railway domain output: $(railway domain -s 'GatherYourDeals-data' --json 2>&1)"
             exit 1
           fi
 
