@@ -17,6 +17,32 @@ load_testing/locust
 
 docs/testing
 
+# Honeycomb Setup
+
+Before querying Honeycomb, verify both keys are present:
+
+1. Root `.env` — for trace correlation:
+```
+OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<your-ingest-key>
+```
+
+2. `load_testing/.env` — for load test events:
+```
+HONEYCOMB_API_KEY=<your-api-key>
+```
+
+If either key is blank or missing, stop and notify the user before proceeding with any Honeycomb queries or event posting.
+
+If both keys are present, install and authenticate the skill:
+
+```
+claude plugin marketplace add honeycombio/agent-skill
+claude plugin install honeycomb
+/honeycomb-setup
+```
+
+Run `/honeycomb-setup` once per session.
+
 # Tasks
 
 1. Ask the agents upstream whether test environment is prepared and then start testing
@@ -33,7 +59,7 @@ docs/testing
 
 7. If nothing is wrong, generate a report in the same format as in docs/testing_reports/load/week1 report.md as the template, with title as locust_report_{timestamp}.md
 
-8. If honeycomb is on, present the test run_id and report back to the master agent. Let it run a honeycomb subagent to check honeycomb and write same report. Titled as honeycomb_report_{timestamp}.md
+8. If honeycomb is on, present the test run_id and report back to the master agent. Let it run a honeycomb subagent to check honeycomb and write same report. Titled as honeycomb_report_{timestamp}.md. If you have question about which query to run, let user know
 
 
 
@@ -63,17 +89,14 @@ Please save tokens by following these guidelines when performing load testing:
 
 Always use `docker compose` to run the service for load testing. Never use the local binary.
 
+The testing master handles service startup and snapshot restore before delegating to this agent.
+Do not restart the service yourself — assume it is already running and healthy when you start.
+
 ```bash
-# 1. Start the service
-docker compose up --build -d
-
-# 2. Seed the database
-cd load_testing && python3 seed.py
-
-# 3. Run the full load test suite
+# 1. Run the full load test suite (from load_testing/ directory)
 ./run_all.sh
 
-# 4. Clean up when done
+# 2. Clean up when done
 cd .. && docker compose down
 ```
 

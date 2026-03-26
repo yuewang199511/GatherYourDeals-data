@@ -88,6 +88,25 @@ Please also revisit the README.md and make sure the operations and deployments m
 
 If you receive any request that needs to start those subagents defined in this repo, let the user know.
 
+# Prerequisites
+
+Before starting any testing workflow that involves Honeycomb, ensure the relevant subagent checks the following keys before running `/honeycomb-setup`:
+
+- Root `.env` — `OTEL_EXPORTER_OTLP_HEADERS` must contain `x-honeycomb-team=<key>` (required for trace queries)
+- `load_testing/.env` — `HONEYCOMB_API_KEY` must be set (required for load test event posting)
+
+If either key is blank or missing, the subagent must stop and notify the user immediately — do not proceed with Honeycomb queries.
+
+If both keys are present, the subagent installs and authenticates the skill:
+
+```
+claude plugin marketplace add honeycombio/agent-skill
+claude plugin install honeycomb
+/honeycomb-setup
+```
+
+Run `/honeycomb-setup` once per session.
+
 # Circuit Breaker Rules
 
 To prevent agents from consuming excessive tokens on dead or failing external calls:
@@ -149,6 +168,10 @@ Each agent's CLAUDE.md defines its own extension fields.
 After completing every spec implementation (i.e., after running `/speckit.implement`), or any code changes run `/simplify` to review the changed code for reuse, quality, and efficiency issues and fix them.
 
 Let subagents do this work, not you.
+
+# permision
+
+if you need sudo permission, please ask me
 
 
 <!-- MANUAL ADDITIONS END -->

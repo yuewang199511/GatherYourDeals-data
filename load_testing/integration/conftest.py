@@ -5,13 +5,15 @@ Reads configuration from load_testing/.env (if present) and environment variable
 using the same GYD_* convention as seed.py and the locust common.py.
 
 Fixtures:
-  config          (session) — validated config dict
+  test_run_id     (session) — unique run ID, injected as X-Test-Run-Id header
+  config          (session) — validated config dict (includes test_run_id)
   user_session    (session) — regular user auth tokens; registers user if not exists
   admin_session   (session) — admin auth tokens
   user_token_pair (function) — fresh token pair for tests that consume/invalidate tokens
 """
 
 import os
+import datetime
 
 import pytest
 import requests
@@ -25,7 +27,7 @@ load_dotenv(_ENV_FILE)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _login(base_url, username, password, label):
+def _login(base_url, username, password, label, test_run_id=None):
     """Log in and return a token dict. Calls pytest.exit() on failure."""
     resp = requests.post(
         f"{base_url}/api/v1/auth/login",
@@ -39,10 +41,35 @@ def _login(base_url, username, password, label):
             returncode=1,
         )
     data = resp.json()
+    headers = {"Authorization": f"Bearer {data['access_token']}"}
+    if test_run_id:
+        headers["X-Test-Run-Id"] = test_run_id
+        headers["X-Test-Group"] = "integration"
+        headers["X-Test-Phase"] = "integration"
     return {
         "refresh_token": data["refresh_token"],
-        "headers": {"Authorization": f"Bearer {data['access_token']}"},
+        "headers": headers,
     }
+
+
+# ---------------------------------------------------------------------------
+# test_run_id fixture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def test_run_id():
+    """
+    Generate a unique test run ID for this session.
+    Passed as X-Test-Run-Id header on all authenticated requests so traces
+    can be correlated in Honeycomb via the test.run_id span attribute.
+    Falls back to GYD_TEST_RUN_ID env var when set by CI (e.g. GitHub Actions).
+    """
+    env_id = os.environ.get("GYD_TEST_RUN_ID", "")
+    if env_id:
+        return env_id
+    run_id = "integration_" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+    print(f"\n[integration] test_run_id: {run_id}", flush=True)
+    return run_id
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +77,7 @@ def _login(base_url, username, password, label):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def config():
+def config(test_run_id):
     """Return validated configuration from environment variables."""
     base_url = os.environ.get("GYD_TARGET_URL", "http://localhost:8080").rstrip("/")
     username = os.environ.get("GYD_TEST_USERNAME", "")
@@ -80,6 +107,7 @@ def config():
         "password": password,
         "admin_username": admin_username,
         "admin_password": admin_password,
+        "test_run_id": test_run_id,
     }
 
 
@@ -112,7 +140,7 @@ def user_session(config):
             returncode=1,
         )
 
-    return _login(base_url, username, password, "user_session")
+    return _login(base_url, username, password, "user_session", config["test_run_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +160,7 @@ def admin_session(config):
         config["admin_username"],
         config["admin_password"],
         "admin_session",
+        config["test_run_id"],
     )
 
 
@@ -159,5 +188,10 @@ def user_token_pair(config):
     data = resp.json()
     return {
         "refresh_token": data["refresh_token"],
-        "headers": {"Authorization": f"Bearer {data['access_token']}"},
+        "headers": {
+            "Authorization": f"Bearer {data['access_token']}",
+            "X-Test-Run-Id": config["test_run_id"],
+            "X-Test-Group": "integration",
+            "X-Test-Phase": "integration",
+        },
     }

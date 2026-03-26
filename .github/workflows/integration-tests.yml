@@ -70,6 +70,7 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_TEST_RUN_ID: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
         run: |
           cd load_testing
           python3 -m pytest integration/ -v

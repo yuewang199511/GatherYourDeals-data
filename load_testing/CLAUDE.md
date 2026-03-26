@@ -20,12 +20,39 @@ integration/
 
 locust/
 
-# tasks
+# Local vs Remote
 
-1. revise the testing database setup if you feel the plan there is not suitable anymore, escalate to user to review and accept
-2. Receive reports from the subagents about the testing result and fix plan if there are issues. As the fix plan needs to be viewed by user.
-3. Only let the subagents to perform the fixing of testing codes and also the testing plans in docs/testing
-4. If code needs to be fixed outside of test, which means it is bussiness code or service setup, report to master agent.
+Check `GYD_TARGET_URL` in `load_testing/.env` to determine the test environment:
+- If `GYD_TARGET_URL` contains `localhost` or is unset — **local test**
+- If `GYD_TARGET_URL` is anything else — **remote test**
+
+If only running integration test, just push and let integration test subagent to check result from repo host
+
+## Local test setup
+Before running any tests locally:
+1. Restore the snapshot and start the service using the SQLite Snapshot Restore instructions below
+2. Verify the service is healthy: `curl -sf http://localhost:8080/health`
+3. If the service is already running and healthy, skip restore and startup — do not restart unnecessarily
+
+## Remote test setup
+Do not touch local service or snapshot.
+Verify the remote service is healthy before running tests: `curl -sf {GYD_TARGET_URL}/health`
+If the health check fails, stop and report to the user — do not proceed.
+
+# Test Execution Order
+
+Always run in this order — do not run load tests if integration tests fail:
+1. Integration tests first — run integration subagent, wait for pass
+2. Load tests second — only start locust subagent after integration tests pass
+
+If integration tests fail, stop and report to the user before proceeding to load tests.
+
+# Tasks
+
+1. Revise the testing database setup if you feel the plan there is not suitable anymore, escalate to user to review and accept.
+2. Receive reports from the subagents about the testing result and fix plan if there are issues. Fix plan needs to be reviewed by user.
+3. Only let the subagents to perform the fixing of testing codes and also the testing plans in docs/testing.
+4. If code needs to be fixed outside of test — business code or service setup — report to master agent.
 
 # escalation rule
 
@@ -46,11 +73,23 @@ Under `### Extension` include:
 
 ---
 
-### SQLite Snapshot Restore (Docker)
+### SQLite Snapshot Restore and Start (Docker)
+
+All commands below must be run from the **repo root** (not from `load_testing/`).
+
 Always stop the app container before copying a snapshot into place:
 ```bash
+# From repo root:
 docker compose stop app
-cp snapshot.db /path/to/data.db
-docker compose start app
+cp load_testing/seed_snapshot.db data/db/gatheryourdeals.db
+docker compose up -d
 ```
+
+Do NOT use `--build` here — no code changed, rebuilding is unnecessary and slow.
+
 If the service is running when you copy, Docker keeps the old file descriptor open and the copy lands on a new inode that the running process never sees — the restore silently has no effect.
+
+Verify the service is healthy after startup:
+```bash
+curl -sf http://localhost:8080/health
+```
