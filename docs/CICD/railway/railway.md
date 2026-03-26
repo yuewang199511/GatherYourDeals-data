@@ -1,27 +1,6 @@
-# CI/CD with Railway — Structure and Process
+# CI/CD with Railway
 
-## Branch Strategy
-
-```
-feature/* ──PR──► develop ──PR──► main
-```
-
-- `main`: protected — only PRs from `develop` are allowed (`protect-main` check enforces this)
-- `develop`: protected — 4 required checks must pass before merge
-- `feature/*`: open — PRs target `develop`
-
-## Workflow Overview
-
-| File | Trigger | Purpose |
-|---|---|---|
-| `integration-tests.yml` | PR → develop | Pre-merge: deploy to Railway load-test + test |
-| `integration-tests.yml` | push → develop | Post-merge: deploy to Railway load-test + test |
-| `load-tests.yml` | Manual (`workflow_dispatch`) | Full Locust suite against Railway load-test |
-| `protect-main.yml` | PR → main | Blocks merge if source branch ≠ develop |
-| `test.yml` | PR/push → develop or main | Go unit tests + race detector |
-| `build.yml` | PR/push → develop or main | Docker build check |
-| `code-quality.yml` | PR/push → develop or main | golangci-lint |
-| `security.yml` | PR/push → develop or main | govulncheck |
+For branch strategy, required checks, and workflow triggers — see `docs/CICD/CICD.md`.
 
 ## Required GitHub Secrets
 
