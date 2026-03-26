@@ -23,11 +23,11 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy to load-test and resolve URL
+      - name: Deploy to load-test and wait for healthy
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway up --detach --service "GatherYourDeals-data"
+          railway up --service "GatherYourDeals-data"
 
           DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
           if [ -z "$DOMAIN" ]; then
