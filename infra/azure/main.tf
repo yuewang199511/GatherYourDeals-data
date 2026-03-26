@@ -7,11 +7,10 @@ terraform {
   }
 }
 
-# Authentication is handled by ARM_* environment variables injected by
-# the azure/login@v2 action (OIDC federated credential).
+# Authentication via ARM_CLIENT_ID / ARM_CLIENT_SECRET / ARM_TENANT_ID /
+# ARM_SUBSCRIPTION_ID set by the azure/login@v2 step in CI.
 provider "azurerm" {
   features {}
-  use_oidc = true
 }
 
 locals {
