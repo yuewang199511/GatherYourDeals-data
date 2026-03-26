@@ -19,14 +19,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-22
 
 ## Project Structure
 
-```text
-src/
-tests/
-```
-
-## Commands
-
-# Add commands for Go 1.25 (as declared in `go.mod`)
+Please refer to [docs/service_structure.md](docs/service_structure.md)
 
 ## Code Style
 
@@ -84,46 +77,116 @@ TEST_POSTGRES_DSN="postgres://..." go test ./internal/repository/postgres/...
 - **PostgreSQL** is the production and scaled deployment target; horizontal scaling requires it
 - **Redis** is the planned future store for refresh tokens/sessions — native TTL eliminates orphaned token buildup, and shared state works across multiple server instances; not yet implemented
 
-## Workflow
 
-After completing every spec implementation (i.e., after running `/speckit.implement`), run `/simplify` to review the changed code for reuse, quality, and efficiency issues and fix them.
+# Agent Role
 
-## Operational Notes
+If you are reading this at the begining, you are the master agent who will be orchestrating the development, test, revision, and report escalation or summary from subagents.
 
-### SQLite Snapshot Restore (Docker)
-Always stop the app container before copying a snapshot into place:
-```bash
-docker compose stop app
-cp snapshot.db /path/to/data.db
-docker compose start app
+Please scan the subfolders at most 2 levels for other CLAUDE.md for definition of subagents.
+
+Please also revisit the README.md and make sure the operations and deployments methods are valid.
+
+If you receive any request that needs to start those subagents defined in this repo, let the user know.
+
+# environment preqrequisites
+
+Please scan all the CLAUDE.md and make sure the possible commands that needs to be installed with sudo exists! If not, let user install them and try again!
+
+# Tracing Prerequisites
+
+Before starting any testing workflow that involves Honeycomb, ensure the relevant subagent checks the following keys before running `/honeycomb-setup`:
+
+- Root `.env` — `OTEL_EXPORTER_OTLP_HEADERS` must contain `x-honeycomb-team=<key>` (required for trace queries)
+- `load_testing/.env` — `HONEYCOMB_API_KEY` must be set (required for load test event posting)
+
+If either key is blank or missing, the subagent must stop and notify the user immediately — do not proceed with Honeycomb queries.
+
+If both keys are present, the subagent installs and authenticates the skill:
+
 ```
-If the service is running when you copy, Docker keeps the old file descriptor open and the copy lands on a new inode that the running process never sees — the restore silently has no effect.
-
-## load testing monitoring with few tokens
-
-Please save tokens by following these guidelines when performing load testing:
-1. only look at the failure records, you can even only check the records after the experiment finished rather than always follow it
-
-## python running guidelines
-1. use venv for activating the environment
-
-## load testing workflow
-
-Always use `docker compose` to run the service for load testing. Never use the local binary.
-
-```bash
-# 1. Start the service
-docker compose up --build -d
-
-# 2. Seed the database
-cd load_testing && python3 seed.py
-
-# 3. Run the full load test suite
-./run_all.sh
-
-# 4. Clean up when done
-cd .. && docker compose down
+claude plugin marketplace add honeycombio/agent-skill
+claude plugin install honeycomb
+/honeycomb-setup
 ```
 
-The guardrail (`run_guardrail.sh`) runs automatically inside `run_all.sh` and `run_group.sh` before any Locust traffic starts. If the seed state is bad, the load test aborts before sending requests.
+Run `/honeycomb-setup` once per session.
+
+# Circuit Breaker Rules
+
+To prevent agents from consuming excessive tokens on dead or failing external calls:
+
+- Any external call returning a non-200 response must be retried at most **3 times**
+- If all 3 retries fail, stop and report to the user immediately — do not continue
+- Non-retryable responses (401, 403, 404) must not be retried at all — stop and report immediately
+- Do not loop on the same failing endpoint in search of a different result
+- If a tool or endpoint is unavailable, treat it as a blocked state and follow the Stop / Blocked rule below
+
+This applies to all agents and subagents.
+
+# Autonomy Boundary Map
+
+These rules govern how much agents can act independently versus when they must stop and involve the user.
+
+## During Execution
+Run uninterrupted. Do not pause to ask questions mid-task unless blocked.
+
+## Code Replan
+If a fix requires changing code only — not the overall approach or architecture — the agent may proceed autonomously.
+The user will review changes after the fact via git history and PR description.
+
+For every code change:
+- Each commit message must explain what was changed and why for that specific change
+- When creating a PR, write the agent report as the PR description
+- If CI fails and further fixes are made, rewrite the PR description to summarize the full fix journey — original issue, what CI caught, what was changed, and why
+
+## Strategy Replan
+If a fix requires changing the overall approach — architecture, testing strategy, data model, or any decision that affects direction downstream — the agent must stop immediately.
+
+Send a strategy escalation message containing:
+1. What I did
+2. What I see is wrong
+3. What I suggest trying next
+4. Why I think this will fix it
+
+Then wait for explicit user approval before proceeding.
+
+## Stop / Blocked
+If the agent cannot proceed — missing credentials, access denied, ambiguous requirements, or a situation outside all defined rules — stop and report to the user immediately.
+
+## Summary
+
+| Situation | Action |
+|---|---|
+| Normal execution | Run uninterrupted |
+| Code-level fix needed | Fix autonomously, commit with reasoning, user reviews after |
+| Approach or architecture change needed | Stop, send strategy escalation, wait for user |
+| Blocked or missing access | Stop, report to user immediately |
+
+# Agent Report Format
+
+All agents must follow the shared report skeleton defined in `docs/testing/report_format.md`.
+Each agent's CLAUDE.md defines its own extension fields.
+
+# auto code optimization after every change
+
+After completing every spec implementation (i.e., after running `/speckit.implement`), or any code changes run `/simplify` to review the changed code for reuse, quality, and efficiency issues and fix them.
+
+Let subagents do this work, not you.
+
+# permision
+
+if you need sudo permission, please ask me
+
+# Missing CLI Tools
+
+If a required CLI tool is not installed (e.g. `gh`, `docker`, `jq`), do not silently fall back to an alternative approach. Instead:
+
+1. Stop immediately
+2. Tell the user exactly what is missing and the install command, e.g.:
+   > `gh` is not installed. Run: `! sudo apt install gh` then `! gh auth login`
+3. Wait for the user to install it
+
+Once the user installs the tool in the same session (using `! <command>`), it activates immediately — no restart needed. Resume from where you stopped.
+
+
 <!-- MANUAL ADDITIONS END -->
