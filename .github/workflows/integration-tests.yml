@@ -56,8 +56,8 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway run --service "GatherYourDeals-data" psql "$DATABASE_URL" -c \
-            "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          echo "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';" > /tmp/reset.sql
+          railway run --service "GatherYourDeals-data" -- sh -c 'psql "$DATABASE_PUBLIC_URL" -f /tmp/reset.sql'
 
       - name: Run integration tests
         env:
