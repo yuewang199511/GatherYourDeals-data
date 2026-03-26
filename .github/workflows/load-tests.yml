@@ -33,7 +33,7 @@ jobs:
         run: |
           railway up --detach --service "GatherYourDeals-data"
 
-          DOMAIN=$(railway domain --json | jq -r '.domain // empty')
+          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: Could not get domain for load-test environment."
             echo "railway domain output: $(railway domain --json 2>&1)"
