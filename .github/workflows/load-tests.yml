@@ -85,10 +85,13 @@ jobs:
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
           RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
-          # railway run injects Railway env vars locally; psql connects via DATABASE_PUBLIC_URL
-          # Use if-condition to capture failure rather than letting set -e exit silently
-          if ! railway run --service "GatherYourDeals-data" -- \
-               psql "$DATABASE_PUBLIC_URL" -c "$RESET_SQL"; then
+          # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment
+          if ! DB_URL=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
+            echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
+            exit 1
+          fi
+          # Step 2: run psql directly with the resolved URL
+          if ! psql "$DB_URL" -c "$RESET_SQL"; then
             echo "ERROR: Database reset failed"
             exit 1
           fi
