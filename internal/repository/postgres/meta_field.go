@@ -23,8 +23,12 @@ func NewMetaFieldRepo(db *DB) *MetaFieldRepo {
 
 func (r *MetaFieldRepo) CreateField(ctx context.Context, field *model.MetaField) error {
 	query := `INSERT INTO meta_fields (` + metaColumns + `) VALUES ($1, $2, $3, $4)`
+	native := 0
+	if field.Native {
+		native = 1
+	}
 	_, err := r.db.conn.ExecContext(ctx, query,
-		field.FieldName, field.Description, field.FieldType, field.Native)
+		field.FieldName, field.Description, field.FieldType, native)
 	if err != nil {
 		return fmt.Errorf("create meta field: %w", err)
 	}
