@@ -33,7 +33,7 @@ func (r *MetaFieldRepo) CreateField(ctx context.Context, field *model.MetaField)
 		field.FieldName, field.Description, field.FieldType, native)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "meta_fields_pkey" {
 			return model.ErrMetaFieldExists
 		}
 		return fmt.Errorf("create meta field: %w", err)
