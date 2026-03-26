@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 60
 
     concurrency:
-      group: load-test-env
+      group: ${{ inputs.provider }}-load-test-env
       cancel-in-progress: false
 
     steps:
