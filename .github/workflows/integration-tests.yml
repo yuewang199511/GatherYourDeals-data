@@ -28,79 +28,35 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
-          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
 
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Post-merge: deploy develop to the persistent load-test environment and test there.
             echo "Post-merge run — deploying to load-test environment..."
-
-            railway link "$PROJECT_ID"
-            railway environment "load-test"
-            railway service "GatherYourDeals-data"
-            railway up --detach
-
-            # Resolve the load-test environment ID to get the domain
             ENV_NAME="load-test"
           else
-            # Pre-merge: use the Railway preview environment for this PR branch.
             ENV_NAME="${{ github.head_ref }}"
             echo "Pre-merge run — targeting preview environment '$ENV_NAME'..."
           fi
 
-          # Retry loop: preview envs may still be provisioning when this job starts
+          railway link "$PROJECT_ID"
+
+          # Retry: preview envs may still be provisioning when this job starts
           for attempt in $(seq 1 20); do
-            ENV_RESP=$(curl -s -X POST \
-              -H "Authorization: Bearer $RAILWAY_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg pid "$PROJECT_ID" \
-                '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
-              https://backboard.railway.app/graphql/v2)
-
-            # Surface any API-level errors on first attempt to aid debugging
-            if [ "$attempt" -eq 1 ]; then
-              API_ERRORS=$(echo "$ENV_RESP" | jq -r '.errors // empty')
-              if [ -n "$API_ERRORS" ]; then
-                echo "Railway API returned errors: $API_ERRORS"
-                echo "Full response: $ENV_RESP"
-                exit 1
-              fi
-            fi
-
-            ENV_ID=$(echo "$ENV_RESP" | jq -r \
-              --arg name "$ENV_NAME" \
-              '.data.project.environments.edges[] | select(.node.name == $name) | .node.id // empty')
-
-            if [ -n "$ENV_ID" ]; then
-              echo "Found environment '$ENV_NAME' (id: $ENV_ID)"
+            if railway environment "$ENV_NAME" 2>/dev/null; then
               break
             fi
             echo "Environment '$ENV_NAME' not ready yet (attempt $attempt/20) — waiting 15s..."
-            if [ "$attempt" -eq 1 ]; then
-              echo "Available environments: $(echo "$ENV_RESP" | jq -r '.data.project.environments.edges[].node.name' 2>/dev/null || echo 'none')"
-            fi
             sleep 15
           done
 
-          if [ -z "$ENV_ID" ]; then
-            echo "ERROR: Environment '$ENV_NAME' not found after retries."
-            echo "Available environments: $(echo "$ENV_RESP" | jq -r '.data.project.environments.edges[].node.name' 2>/dev/null || echo 'none')"
-            exit 1
+          railway service "GatherYourDeals-data"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            railway up --detach
           fi
 
-          # Get the public domain for the service in this environment
-          DOMAIN_RESP=$(curl -s -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
-              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
-            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
-
+          DOMAIN=$(railway domain)
           if [ -z "$DOMAIN" ]; then
-            echo "ERROR: No public domain found for service in environment '$ENV_NAME'."
-            echo "Full domain response: $DOMAIN_RESP"
+            echo "ERROR: Could not get domain for environment '$ENV_NAME'."
             exit 1
           fi
 
