@@ -56,10 +56,11 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway link -p "7639518c-e0a7-4cd4-8227-6c2575458620"
-          railway environment "load-test"
-          railway service "GatherYourDeals-data"
-          railway up --detach
+          railway up \
+            -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
+            -e "load-test" \
+            -s "GatherYourDeals-data" \
+            --detach
           echo "Deployment triggered. Waiting for health check..."
 
       - name: Resolve load-test URL (Railway)
@@ -235,10 +236,11 @@ jobs:
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          railway link -p "7639518c-e0a7-4cd4-8227-6c2575458620"
-          railway environment "load-test"
-          railway service "GatherYourDeals-data"
-          railway run psql "$DATABASE_URL" -c \
+          railway run \
+            -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
+            -e "load-test" \
+            -s "GatherYourDeals-data" \
+            -- psql "$DATABASE_URL" -c \
             "TRUNCATE receipts CASCADE; DELETE FROM users WHERE role != 'admin';"
           cd load_testing && python3 seed.py
 
