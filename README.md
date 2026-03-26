@@ -68,6 +68,33 @@ Logs are written to stdout (visible via `docker compose logs`) and to rotating f
 > If you must use a secret that contains a dollar sign, escape each one
 > by doubling it (e.g. `$$`).
 
+## Configuration
+
+Configuration is loaded in this order — later values override earlier ones:
+
+1. Built-in defaults
+2. `config.yaml` (optional — if the file is absent, defaults apply)
+3. Environment variables (always win)
+
+This means the service runs without any config file on Railway, Azure, or any container platform — everything can be driven by env vars alone. `config.yaml` remains useful for local development.
+
+### Environment variables
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `GYD_JWT_SECRET` | — | **Required.** JWT signing secret, minimum 32 characters. Generate with `openssl rand -hex 32`. |
+| `PORT` | `8080` | HTTP listen port. Injected automatically by Railway and Azure Container Apps. |
+| `GYD_DATABASE_DRIVER` | `sqlite` | Database backend. Set to `postgres` for cloud deployment. |
+| `DATABASE_URL` | — | PostgreSQL connection string. Injected automatically by Railway when a PostgreSQL add-on is provisioned. |
+| `GYD_ACCESS_TOKEN_EXP` | `1h` | Access token lifetime. Go duration syntax: `15m`, `1h`, `24h`. |
+| `GYD_REFRESH_TOKEN_EXP` | `168h` | Refresh token lifetime. Go duration syntax: `24h`, `168h`, `720h`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OpenTelemetry export endpoint (e.g. `https://api.honeycomb.io`). Leave blank to disable tracing. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | — | OTel headers, e.g. `x-honeycomb-team=<key>`. |
+| `OTEL_SERVICE_NAME` | `gatheryourdeals` | Service name shown in traces. |
+| `OTEL_RESOURCE_ATTRIBUTES` | — | Comma-separated span attributes, e.g. `service.environment=production,db.type=postgres`. |
+
+See `.env.example` for a full annotated template.
+
 ## Logging
 
 All logs (Gin request logs and application logs) go to both stdout and a rotating log file. Log files are named with their creation timestamp, e.g. `gatheryourdeals-2025-04-05-14-30-00.log`. Only the two most recent files are kept.

@@ -51,21 +51,33 @@ type AuthConfig struct {
 }
 
 // Load reads the config from a YAML file at the given path.
-// After parsing, GYD_DATABASE_DRIVER env var overrides database.driver if set.
+// If the file does not exist, built-in defaults and environment variables are used.
+// After parsing, environment variables override any file-based values.
 func Load(path string) (*Config, error) {
+	var cfg Config
+
 	data, err := os.ReadFile(path)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
-
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config file: %w", err)
+	if err == nil {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, fmt.Errorf("parse config file: %w", err)
+		}
 	}
 
-	// Allow GYD_DATABASE_DRIVER to override the config file driver value.
+	// Environment variable overrides.
 	if d := os.Getenv("GYD_DATABASE_DRIVER"); d != "" {
 		cfg.Database.Driver = d
+	}
+	if p := os.Getenv("PORT"); p != "" {
+		cfg.Server.Port = p
+	}
+	if v := os.Getenv("GYD_ACCESS_TOKEN_EXP"); v != "" {
+		cfg.Auth.AccessTokenExp = v
+	}
+	if v := os.Getenv("GYD_REFRESH_TOKEN_EXP"); v != "" {
+		cfg.Auth.RefreshTokenExp = v
 	}
 
 	if err := cfg.validate(); err != nil {
