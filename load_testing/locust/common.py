@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 import requests
 from locust import HttpUser, events
+from locust.exception import StopUser
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,7 @@ def login(base_url, username, password):
     resp = requests.post(
         f"{base_url}/api/v1/auth/login",
         json={"username": username, "password": password},
-        timeout=10,
+        timeout=30,
     )
     if resp.status_code != 200:
         raise RuntimeError(
@@ -105,16 +106,15 @@ def login(base_url, username, password):
 
 def safe_login(environment, base_url, username, password):
     """
-    Call login() and abort the entire test run on failure.
-    Locust silently swallows on_start() exceptions, so login failures would
-    produce 0 requests with no visible error. This surfaces them immediately.
+    Call login() and stop only the failing user on failure (raises StopUser).
+    This surfaces the error without aborting the entire test run — other users
+    that successfully log in continue running tasks normally.
     """
     try:
         return login(base_url, username, password)
     except Exception as exc:
-        print(f"\n[FATAL] Login failed for '{username}': {exc}", file=sys.stderr)
-        environment.runner.quit()
-        raise
+        print(f"\n[WARN] Login failed for '{username}', stopping this user: {exc}", file=sys.stderr)
+        raise StopUser() from exc
 
 
 class BaseGYDUser(HttpUser):
