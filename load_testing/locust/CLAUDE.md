@@ -85,6 +85,16 @@ Please save tokens by following these guidelines when performing load testing:
 ## python running guidelines
 1. use venv for activating the environment
 
+## Regression Cases
+
+Before concluding a load test run is healthy, check all regression cases in [`docs/testing_reports/buggy/`](../../docs/testing_reports/buggy/):
+
+1. Read every `.md` file in that directory
+2. Verify none of the documented failure patterns appear in the current results
+3. Explicitly call out in your report whether each regression case passed or was not triggered
+
+If any regression case matches the current results, treat it as a test failure — stop and escalate to the user.
+
 ## load testing workflow
 
 Always use `docker compose` to run the service for load testing. Never use the local binary.

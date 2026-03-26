@@ -94,22 +94,20 @@ Please scan all the CLAUDE.md and make sure the possible commands that needs to 
 
 # Tracing Prerequisites
 
-Before starting any testing workflow that involves Honeycomb, ensure the relevant subagent checks the following keys before running `/honeycomb-setup`:
+Before starting any testing workflow that involves Honeycomb, verify all three prerequisites:
 
-- Root `.env` — `OTEL_EXPORTER_OTLP_HEADERS` must contain `x-honeycomb-team=<key>` (required for trace queries)
-- `load_testing/.env` — `HONEYCOMB_API_KEY` must be set (required for load test event posting)
+1. **Honeycomb MCP** — run `claude mcp list` and confirm `honeycomb` appears and is connected.
+   If missing, tell the user to run:
+   ```
+   claude mcp add honeycomb --transport http https://mcp.honeycomb.io/mcp --header "Authorization: Bearer <KEY_ID>:<SECRET_KEY>"
+   ```
+   This is a one-time global setup. Stop and wait for the user to complete it.
 
-If either key is blank or missing, the subagent must stop and notify the user immediately — do not proceed with Honeycomb queries.
+2. **Ingest key** — root `.env` must contain `OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<key>` (required for the service to send traces).
 
-If both keys are present, the subagent installs and authenticates the skill:
+3. **Load test API key** — `load_testing/.env` must contain `HONEYCOMB_API_KEY` (required for load test event posting).
 
-```
-claude plugin marketplace add honeycombio/agent-skill
-claude plugin install honeycomb
-/honeycomb-setup
-```
-
-Run `/honeycomb-setup` once per session.
+If any prerequisite is missing, stop and notify the user immediately — do not proceed with Honeycomb queries.
 
 # Circuit Breaker Rules
 
