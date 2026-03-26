@@ -24,7 +24,7 @@ locals {
 
 # ── Resource Group ─────────────────────────────────────────────────────────────
 # Single RG contains all ephemeral resources. Destroying the RG cascades to
-# every resource inside it, including the ACI created separately by the CI job.
+# every resource inside it, including the Container App created separately by CI.
 resource "azurerm_resource_group" "main" {
   name     = local.name_suffix
   location = var.location
@@ -38,7 +38,7 @@ resource "azurerm_resource_group" "main" {
 
 # ── Container Registry ─────────────────────────────────────────────────────────
 # Basic SKU is cheapest; admin_enabled lets the CI runner authenticate with
-# username/password when creating the ACI (admin credentials, not long-lived).
+# username/password when creating the Container App (admin creds, ephemeral).
 resource "azurerm_container_registry" "main" {
   name                = local.acr_name
   resource_group_name = azurerm_resource_group.main.name
@@ -82,4 +82,13 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_all" {
   server_id        = azurerm_postgresql_flexible_server.main.id
   start_ip_address = "0.0.0.0"
   end_ip_address   = "255.255.255.255"
+}
+
+# ── Container Apps Environment ─────────────────────────────────────────────────
+# Consumption plan: scale to zero when idle, billed per vCPU-second used.
+# This matches Railway's business model — no idle cost between load test runs.
+resource "azurerm_container_app_environment" "main" {
+  name                = local.name_suffix
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
 }

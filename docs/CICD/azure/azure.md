@@ -13,28 +13,42 @@ GitHub Actions (workflow_dispatch)
   └── Terraform + az group delete: destroy all resources
 ```
 
+## Why Container Apps (not ACI or App Service)
+
+The goal is a fair latency and cost comparison with Railway. Railway scales to zero when idle and bills per use — so Azure must use the same model.
+
+| Service | Scale to zero | Billing | Match for Railway |
+|---|---|---|---|
+| App Service | No (always-on) | Per hour | No |
+| ACI | No (runs until deleted) | Per second running | Partial |
+| **Container Apps (Consumption)** | **Yes** | **Per vCPU-second used** | **Yes** |
+
+Container Apps on the Consumption plan is the direct equivalent: managed container runtime, scale to zero, no idle cost.
+
 ## Infrastructure (Terraform)
 
-Terraform manages the stable parts. The ACI is created separately by the CI runner after the image is pushed.
+Terraform manages the durable infrastructure. The Container App is created separately by the CI runner after the image is pushed (avoids chicken-and-egg with ACR).
 
 | Resource | Type | SKU / Tier | Notes |
 |---|---|---|---|
 | Resource Group | `azurerm_resource_group` | — | Named `gyd-lt-<run_id>` — deleting it cascades to everything |
-| Container Registry | `azurerm_container_registry` | Basic | `admin_enabled = true` — credentials used by ACI pull |
+| Container Registry | `azurerm_container_registry` | Basic | `admin_enabled = true` — credentials used for Container App image pull |
 | PostgreSQL Flexible Server | `azurerm_postgresql_flexible_server` | `B_Standard_B2ms` | PostgreSQL 16, public access, firewall allows all IPs |
 | PostgreSQL DB | `azurerm_postgresql_flexible_server_database` | — | Database name: `gatheryourdeals` |
+| Container Apps Environment | `azurerm_container_app_environment` | Consumption | Hosts the Container App; destroyed with the RG |
 
-### App Container (ACI — CLI-managed)
+### App Container (Container Apps — CLI-managed)
 
-Created via `az container create` after the image push, into the same resource group so it is destroyed with the RG.
+Created via `az containerapp create` after the image push, in the same resource group so it is destroyed with the RG.
 
 | Parameter | Value |
 |---|---|
-| CPU | 2 vCPU |
-| Memory | 4 GB |
-| Port | 8080 |
-| DNS label | `gyd-lt-<run_id>.<region>.azurecontainer.io` |
-| Restart policy | Always |
+| CPU | 1.0 vCPU |
+| Memory | 2 Gi |
+| Ingress | External HTTPS (TLS terminated by platform, proxied to port 8080) |
+| Min replicas | 0 (scale to zero) |
+| Max replicas | 10 |
+| FQDN | `gyd-lt-<run_id>.<hash>.<region>.azurecontainerapps.io` |
 
 ## Required GitHub Secrets
 
@@ -120,9 +134,11 @@ Two-phase teardown to handle partial failures:
 | Resource | Duration | Approx Cost |
 |---|---|---|
 | PostgreSQL B_Standard_B2ms | ~45 min | ~$0.05 |
-| ACI 2 vCPU / 4 GB | ~30 min | ~$0.03 |
+| Container Apps (1 vCPU / 2 Gi, active ~30 min) | ~30 min | ~$0.02 |
 | ACR Basic | ~45 min | ~$0.01 |
-| **Total per run** | | **~$0.10** |
+| **Total per run** | | **~$0.08** |
+
+Container Apps idle time (before/after tests) costs nothing — scale to zero.
 
 ## Provider-Specific Docs
 

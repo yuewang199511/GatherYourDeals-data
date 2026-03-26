@@ -110,7 +110,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Provision Azure infra (RG + ACR + PostgreSQL)
+      - name: Provision Azure infra (RG + ACR + PostgreSQL + Container Apps env)
         if: inputs.provider == 'azure'
         env:
           TF_VAR_run_id: ${{ github.run_id }}
@@ -128,12 +128,12 @@ jobs:
           ACR_NAME=$(terraform output -raw acr_name)
           PG_FQDN=$(terraform output -raw postgresql_fqdn)
           RESOURCE_GROUP=$(terraform output -raw resource_group_name)
-          LOCATION=$(terraform output -raw location)
+          CA_ENV=$(terraform output -raw container_app_environment_name)
 
           echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
           echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
           echo "AZ_RESOURCE_GROUP=$RESOURCE_GROUP" >> $GITHUB_ENV
-          echo "AZ_LOCATION=$LOCATION" >> $GITHUB_ENV
+          echo "AZ_CA_ENV=$CA_ENV" >> $GITHUB_ENV
           AZ_DATABASE_URL="postgres://gydadmin:${{ secrets.AZURE_PG_ADMIN_PASSWORD }}@${PG_FQDN}:5432/gatheryourdeals?sslmode=require"
           echo "AZ_DATABASE_URL=$AZ_DATABASE_URL" >> $GITHUB_ENV
 
@@ -147,41 +147,49 @@ jobs:
             --file Dockerfile \
             .
 
-      - name: Deploy app to Azure Container Instance
+      - name: Deploy app to Azure Container Apps
         if: inputs.provider == 'azure'
         run: |
           ACR_ADMIN_PASSWORD=$(az acr credential show \
             --name "$ACR_NAME" \
             --query "passwords[0].value" -o tsv)
 
-          az container create \
-            --resource-group "$AZ_RESOURCE_GROUP" \
+          # Container Apps (Consumption plan) = scale to zero when idle,
+          # billed per vCPU-second used — same model as Railway.
+          az containerapp create \
             --name "gyd-lt-${{ github.run_id }}" \
+            --resource-group "$AZ_RESOURCE_GROUP" \
+            --environment "$AZ_CA_ENV" \
             --image "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
-            --registry-login-server "$ACR_LOGIN_SERVER" \
+            --registry-server "$ACR_LOGIN_SERVER" \
             --registry-username "$ACR_NAME" \
             --registry-password "$ACR_ADMIN_PASSWORD" \
-            --cpu 2 --memory 4 \
-            --ports 8080 \
-            --dns-name-label "gyd-lt-${{ github.run_id }}" \
-            --ip-address Public \
-            --os-type Linux \
-            --location "$AZ_LOCATION" \
-            --environment-variables \
+            --target-port 8080 \
+            --ingress external \
+            --min-replicas 0 \
+            --max-replicas 10 \
+            --cpu 1.0 --memory 2.0Gi \
+            --secrets \
+              "database-url=$AZ_DATABASE_URL" \
+              "gyd-admin-password=${{ secrets.GYD_ADMIN_PASSWORD }}" \
+              "gyd-jwt-secret=${{ secrets.GYD_JWT_SECRET }}" \
+              "otel-headers=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" \
+            --env-vars \
               GYD_DATABASE_DRIVER=postgres \
-              GYD_ADMIN_USERNAME="${{ secrets.GYD_ADMIN_USERNAME }}" \
+              "GYD_ADMIN_USERNAME=${{ secrets.GYD_ADMIN_USERNAME }}" \
               OTEL_SERVICE_NAME=gatheryourdeals \
-            --secure-environment-variables \
-              DATABASE_URL="$AZ_DATABASE_URL" \
-              GYD_ADMIN_PASSWORD="${{ secrets.GYD_ADMIN_PASSWORD }}" \
-              GYD_JWT_SECRET="${{ secrets.GYD_JWT_SECRET }}" \
-              OTEL_EXPORTER_OTLP_HEADERS="${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" \
-            --restart-policy Always \
-            --no-wait
+              DATABASE_URL=secretref:database-url \
+              GYD_ADMIN_PASSWORD=secretref:gyd-admin-password \
+              GYD_JWT_SECRET=secretref:gyd-jwt-secret \
+              OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers
 
-          ACI_FQDN="gyd-lt-${{ github.run_id }}.${AZ_LOCATION}.azurecontainer.io"
-          echo "LOAD_TEST_URL=http://${ACI_FQDN}:8080" >> $GITHUB_ENV
-          echo "ACI deployed: http://${ACI_FQDN}:8080"
+          # Container Apps issues a stable HTTPS FQDN automatically
+          APP_FQDN=$(az containerapp show \
+            --name "gyd-lt-${{ github.run_id }}" \
+            --resource-group "$AZ_RESOURCE_GROUP" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "LOAD_TEST_URL=https://${APP_FQDN}" >> $GITHUB_ENV
+          echo "Container App deployed: https://${APP_FQDN}"
 
       # ── Provider-agnostic ──────────────────────────────────────────────────────
       - name: Wait for load-test service to be healthy

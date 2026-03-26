@@ -32,3 +32,8 @@ output "postgresql_database" {
   description = "PostgreSQL database name"
   value       = azurerm_postgresql_flexible_server_database.main.name
 }
+
+output "container_app_environment_name" {
+  description = "Container Apps Environment name — passed to az containerapp create"
+  value       = azurerm_container_app_environment.main.name
+}
