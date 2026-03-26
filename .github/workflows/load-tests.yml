@@ -37,8 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    # Each manually-triggered run gets its own concurrency slot — no silent drops.
+    # workflow_dispatch means human intent per trigger; we never want to queue-cancel a waiting run.
     concurrency:
-      group: ${{ inputs.provider }}-load-test-env
+      group: ${{ inputs.provider }}-load-test-${{ github.run_id }}
       cancel-in-progress: false
 
     steps:
