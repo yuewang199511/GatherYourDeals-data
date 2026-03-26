@@ -98,6 +98,10 @@ jobs:
           echo "Load-test URL: $LOAD_TEST_URL"
 
       # ── Azure ─────────────────────────────────────────────────────────────────
+      - name: Install Terraform
+        if: inputs.provider == 'azure'
+        uses: hashicorp/setup-terraform@v3
+
       - name: Azure login
         if: inputs.provider == 'azure'
         env:
