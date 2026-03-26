@@ -38,10 +38,11 @@ jobs:
     # Azure needs more time: Terraform + PostgreSQL provisioning takes 8-15 min
     timeout-minutes: 60
 
-    # Each manually-triggered run gets its own concurrency slot — no silent drops.
-    # workflow_dispatch means human intent per trigger; we never want a queued run silently canceled.
+    # Serialize per provider — both Railway and Azure load tests share the same
+    # environment resources (PostgreSQL, replicas). Parallel runs would corrupt data
+    # and hit connection limits. workflow_dispatch is manual so pile-ups are rare.
     concurrency:
-      group: ${{ inputs.provider }}-load-test-${{ github.run_id }}
+      group: ${{ inputs.provider }}-load-test
       cancel-in-progress: false
 
     steps:
