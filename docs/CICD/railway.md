@@ -99,6 +99,17 @@ The reset+reseed on every run ensures results are comparable across runs regardl
 - [ ] Unit tests pass: `go test ./...`
 - [ ] No lint errors: `golangci-lint run`
 
+## Debugging Failed Deployments
+
+**Always check Railway build logs first** before debugging CI. Use the Railway MCP tool or dashboard before reading workflow files:
+
+```
+mcp__railway-mcp-server__list-deployments  → get deployment IDs
+mcp__railway-mcp-server__get-logs (logType: build, deploymentId: ...)  → see the actual error
+```
+
+This saves significant time — CI log often only shows "health check failed", not the root cause.
+
 ## Known Failure Patterns for Future Agents
 
 ### 1. Do not call `railway link` with a project token
@@ -127,15 +138,26 @@ Railway creates dynamic preview environments per PR branch. Project tokens are e
 **Do not attempt** to use project tokens with preview environments — it will always fail.
 **Solution:** Run pre-merge tests locally (no token needed) and reserve Railway for post-merge against a fixed, known environment.
 
-### 4. `railway domain` returns empty when service not linked
-If `railway link` succeeded for the environment but not the service, `railway domain` returns "Project does not have any services."
+### 4. `railway domain` JSON uses `domains[]` array, not `domain` string
+The Railway CLI returns `{"domains": ["https://..."]}`, not `{"domain": "..."}`.
+
+**Wrong:** `jq -r '.domain // empty'`
+**Right:** `jq -r '.domains[0] // empty'`
+
+Also note: the URL already includes `https://` — do not prepend it again.
 
 Always specify the service explicitly:
 ```bash
-railway domain -s "GatherYourDeals-data" --json | jq -r '.domain // empty'
+railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty'
 ```
 
-### 5. Raw Railway GraphQL API requires account-level token
+### 5. `.gitignore` without leading `/` excludes subdirectories matching the name
+`railway up` applies `.gitignore` rules when creating the upload archive. An unanchored pattern like `gatheryourdeals` matches the `cmd/gatheryourdeals/` directory, causing the build to fail with `stat /app/cmd/gatheryourdeals: directory not found`.
+
+**Wrong:** `gatheryourdeals` in `.gitignore`
+**Right:** `/gatheryourdeals` — anchors the pattern to the repo root only
+
+### 6. Raw Railway GraphQL API requires account-level token
 Querying `project { environments { ... } }` via the Railway GraphQL API (`backboard.railway.app/graphql/v2`) requires an account-level personal token, not a project token. Project tokens return `Not Authorized` on this query.
 
 **Use the Railway CLI instead** — it handles auth internally and works with project tokens for supported operations.

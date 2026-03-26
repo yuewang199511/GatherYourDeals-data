@@ -39,7 +39,7 @@ load_testing/results/
 load_testing/.env
 
 # build
-gatheryourdeals
+/gatheryourdeals
 
 # LLM settings
 .claude/
