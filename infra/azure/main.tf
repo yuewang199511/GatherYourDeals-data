@@ -28,6 +28,9 @@ resource "random_password" "pg" {
 # ARM_SUBSCRIPTION_ID set by the azure/login@v2 step in CI.
 provider "azurerm" {
   features {}
+  # The SP has Contributor, which cannot bulk-register all providers.
+  # We register only the 4 namespaces we need via `az provider register` in CI.
+  resource_provider_registrations = "none"
 }
 
 locals {

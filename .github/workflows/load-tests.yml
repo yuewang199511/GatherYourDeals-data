@@ -116,6 +116,16 @@ jobs:
             --tenant "$ARM_TENANT_ID"
           az account set --subscription "$ARM_SUBSCRIPTION_ID"
 
+      - name: Register Azure resource providers
+        if: inputs.provider == 'azure'
+        run: |
+          # Contributor role cannot bulk-register all providers (Terraform's default).
+          # Register only the 4 namespaces this stack uses; idempotent if already registered.
+          az provider register --namespace Microsoft.ContainerRegistry --wait
+          az provider register --namespace Microsoft.DBforPostgreSQL --wait
+          az provider register --namespace Microsoft.App --wait
+          az provider register --namespace Microsoft.OperationalInsights --wait
+
       - name: Provision Azure infra (RG + ACR + PostgreSQL + Container Apps env)
         if: inputs.provider == 'azure'
         env:
