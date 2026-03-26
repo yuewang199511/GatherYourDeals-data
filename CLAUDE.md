@@ -19,14 +19,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-22
 
 ## Project Structure
 
-```text
-src/
-tests/
-```
-
-## Commands
-
-# Add commands for Go 1.25 (as declared in `go.mod`)
+Please refer to [docs/service_structure.md](docs/service_structure.md)
 
 ## Code Style
 
@@ -84,46 +77,78 @@ TEST_POSTGRES_DSN="postgres://..." go test ./internal/repository/postgres/...
 - **PostgreSQL** is the production and scaled deployment target; horizontal scaling requires it
 - **Redis** is the planned future store for refresh tokens/sessions — native TTL eliminates orphaned token buildup, and shared state works across multiple server instances; not yet implemented
 
-## Workflow
 
-After completing every spec implementation (i.e., after running `/speckit.implement`), run `/simplify` to review the changed code for reuse, quality, and efficiency issues and fix them.
+# Agent Role
 
-## Operational Notes
+If you are reading this at the begining, you are the master agent who will be orchestrating the development, test, revision, and report escalation or summary from subagents.
 
-### SQLite Snapshot Restore (Docker)
-Always stop the app container before copying a snapshot into place:
-```bash
-docker compose stop app
-cp snapshot.db /path/to/data.db
-docker compose start app
-```
-If the service is running when you copy, Docker keeps the old file descriptor open and the copy lands on a new inode that the running process never sees — the restore silently has no effect.
+Please scan the subfolders at most 2 levels for other CLAUDE.md for definition of subagents.
 
-## load testing monitoring with few tokens
+Please also revisit the README.md and make sure the operations and deployments methods are valid.
 
-Please save tokens by following these guidelines when performing load testing:
-1. only look at the failure records, you can even only check the records after the experiment finished rather than always follow it
+If you receive any request that needs to start those subagents defined in this repo, let the user know.
 
-## python running guidelines
-1. use venv for activating the environment
+# Circuit Breaker Rules
 
-## load testing workflow
+To prevent agents from consuming excessive tokens on dead or failing external calls:
 
-Always use `docker compose` to run the service for load testing. Never use the local binary.
+- Any external call returning a non-200 response must be retried at most **3 times**
+- If all 3 retries fail, stop and report to the user immediately — do not continue
+- Non-retryable responses (401, 403, 404) must not be retried at all — stop and report immediately
+- Do not loop on the same failing endpoint in search of a different result
+- If a tool or endpoint is unavailable, treat it as a blocked state and follow the Stop / Blocked rule below
 
-```bash
-# 1. Start the service
-docker compose up --build -d
+This applies to all agents and subagents.
 
-# 2. Seed the database
-cd load_testing && python3 seed.py
+# Autonomy Boundary Map
 
-# 3. Run the full load test suite
-./run_all.sh
+These rules govern how much agents can act independently versus when they must stop and involve the user.
 
-# 4. Clean up when done
-cd .. && docker compose down
-```
+## During Execution
+Run uninterrupted. Do not pause to ask questions mid-task unless blocked.
 
-The guardrail (`run_guardrail.sh`) runs automatically inside `run_all.sh` and `run_group.sh` before any Locust traffic starts. If the seed state is bad, the load test aborts before sending requests.
+## Code Replan
+If a fix requires changing code only — not the overall approach or architecture — the agent may proceed autonomously.
+The user will review changes after the fact via git history and PR description.
+
+For every code change:
+- Each commit message must explain what was changed and why for that specific change
+- When creating a PR, write the agent report as the PR description
+- If CI fails and further fixes are made, rewrite the PR description to summarize the full fix journey — original issue, what CI caught, what was changed, and why
+
+## Strategy Replan
+If a fix requires changing the overall approach — architecture, testing strategy, data model, or any decision that affects direction downstream — the agent must stop immediately.
+
+Send a strategy escalation message containing:
+1. What I did
+2. What I see is wrong
+3. What I suggest trying next
+4. Why I think this will fix it
+
+Then wait for explicit user approval before proceeding.
+
+## Stop / Blocked
+If the agent cannot proceed — missing credentials, access denied, ambiguous requirements, or a situation outside all defined rules — stop and report to the user immediately.
+
+## Summary
+
+| Situation | Action |
+|---|---|
+| Normal execution | Run uninterrupted |
+| Code-level fix needed | Fix autonomously, commit with reasoning, user reviews after |
+| Approach or architecture change needed | Stop, send strategy escalation, wait for user |
+| Blocked or missing access | Stop, report to user immediately |
+
+# Agent Report Format
+
+All agents must follow the shared report skeleton defined in `docs/testing/report_format.md`.
+Each agent's CLAUDE.md defines its own extension fields.
+
+# auto code optimization after every change
+
+After completing every spec implementation (i.e., after running `/speckit.implement`), or any code changes run `/simplify` to review the changed code for reuse, quality, and efficiency issues and fix them.
+
+Let subagents do this work, not you.
+
+
 <!-- MANUAL ADDITIONS END -->
