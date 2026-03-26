@@ -49,31 +49,46 @@ jobs:
 
           # Retry loop: preview envs may still be provisioning when this job starts
           for attempt in $(seq 1 20); do
-            ENV_RESP=$(curl -sf -X POST \
+            ENV_RESP=$(curl -s -X POST \
               -H "Authorization: Bearer $RAILWAY_TOKEN" \
               -H "Content-Type: application/json" \
               -d "$(jq -n --arg pid "$PROJECT_ID" \
                 '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
               https://backboard.railway.app/graphql/v2)
 
+            # Surface any API-level errors on first attempt to aid debugging
+            if [ "$attempt" -eq 1 ]; then
+              API_ERRORS=$(echo "$ENV_RESP" | jq -r '.errors // empty')
+              if [ -n "$API_ERRORS" ]; then
+                echo "Railway API returned errors: $API_ERRORS"
+                echo "Full response: $ENV_RESP"
+                exit 1
+              fi
+            fi
+
             ENV_ID=$(echo "$ENV_RESP" | jq -r \
               --arg name "$ENV_NAME" \
-              '.data.project.environments.edges[] | select(.node.name == $name) | .node.id')
+              '.data.project.environments.edges[] | select(.node.name == $name) | .node.id // empty')
 
-            if [ -n "$ENV_ID" ] && [ "$ENV_ID" != "null" ]; then
+            if [ -n "$ENV_ID" ]; then
+              echo "Found environment '$ENV_NAME' (id: $ENV_ID)"
               break
             fi
             echo "Environment '$ENV_NAME' not ready yet (attempt $attempt/20) — waiting 15s..."
+            if [ "$attempt" -eq 1 ]; then
+              echo "Available environments: $(echo "$ENV_RESP" | jq -r '.data.project.environments.edges[].node.name' 2>/dev/null || echo 'none')"
+            fi
             sleep 15
           done
 
-          if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+          if [ -z "$ENV_ID" ]; then
             echo "ERROR: Environment '$ENV_NAME' not found after retries."
+            echo "Available environments: $(echo "$ENV_RESP" | jq -r '.data.project.environments.edges[].node.name' 2>/dev/null || echo 'none')"
             exit 1
           fi
 
           # Get the public domain for the service in this environment
-          DOMAIN_RESP=$(curl -sf -X POST \
+          DOMAIN_RESP=$(curl -s -X POST \
             -H "Authorization: Bearer $RAILWAY_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
@@ -85,6 +100,7 @@ jobs:
 
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: No public domain found for service in environment '$ENV_NAME'."
+            echo "Full domain response: $DOMAIN_RESP"
             exit 1
           fi
 
