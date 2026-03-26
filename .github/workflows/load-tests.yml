@@ -47,7 +47,7 @@ jobs:
       - name: Wait for load-test service to be healthy
         run: |
           echo "Polling $LOAD_TEST_URL/health ..."
-          curl --retry 30 --retry-delay 10 --retry-connrefused \
+          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
                --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
 
       - name: Set up Python
