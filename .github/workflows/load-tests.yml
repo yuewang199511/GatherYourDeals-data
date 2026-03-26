@@ -31,7 +31,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway up --detach
+          railway up --detach --service "GatherYourDeals-data"
 
           DOMAIN=$(railway domain --json | jq -r '.domain // empty')
           if [ -z "$DOMAIN" ]; then
