@@ -101,11 +101,11 @@ The reset+reseed on every run ensures results are comparable across runs regardl
 
 ## Known Failure Patterns for Future Agents
 
-### 1. `railway link` does not accept a positional project ID
-**Wrong:** `railway link "7639518c-..."`
-**Right:** `railway link -p "7639518c-..." -e "load-test" -s "GatherYourDeals-data"`
+### 1. Do not call `railway link` with a project token
+Project tokens already have project + environment context embedded. Calling `railway link -p ... -e ...` returns `Unauthorized` because that command requires account-level access.
 
-The CLI v3 uses flags, not positional arguments.
+**Wrong:** `railway link -p "7639518c-..." -e "load-test" -s "GatherYourDeals-data"`
+**Right:** Just set `RAILWAY_TOKEN` and call `railway up` / `railway domain` directly.
 
 ### 2. `set -e` exits on failed command substitution
 GitHub Actions runs bash with `set -e`. This pattern **silently exits** the script if the command fails:

@@ -27,9 +27,6 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway link -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
-                       -e "load-test" \
-                       -s "GatherYourDeals-data"
           railway up --detach
 
           DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domain // empty')
