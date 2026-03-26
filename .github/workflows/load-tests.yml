@@ -56,7 +56,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway link "7639518c-e0a7-4cd4-8227-6c2575458620"
+          railway link -p "7639518c-e0a7-4cd4-8227-6c2575458620"
           railway environment "load-test"
           railway service "GatherYourDeals-data"
           railway up --detach
@@ -235,7 +235,7 @@ jobs:
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          railway link "7639518c-e0a7-4cd4-8227-6c2575458620"
+          railway link -p "7639518c-e0a7-4cd4-8227-6c2575458620"
           railway environment "load-test"
           railway service "GatherYourDeals-data"
           railway run psql "$DATABASE_URL" -c \
