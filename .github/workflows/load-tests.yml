@@ -3,6 +3,14 @@ name: Load Tests
 on:
   workflow_dispatch:
     inputs:
+      provider:
+        description: "Cloud provider to run against"
+        required: true
+        default: "railway"
+        type: choice
+        options:
+          - railway
+          - azure
       group:
         description: "Group to run (all = full suite via run_all.sh)"
         required: true
@@ -37,9 +45,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Railway CLI
+        if: inputs.provider == 'railway'
         run: npm install -g @railway/cli
 
-      - name: Deploy and resolve load-test URL
+      - name: Deploy and resolve load-test URL (Railway)
+        if: inputs.provider == 'railway'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -61,6 +71,12 @@ jobs:
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
 
+      - name: Deploy and resolve load-test URL (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          echo "ERROR: Azure provider not yet implemented"
+          exit 1
+
       - name: Wait for load-test service to be healthy
         run: |
           echo "Polling $LOAD_TEST_URL/health ..."
@@ -75,7 +91,8 @@ jobs:
       - name: Install test dependencies
         run: pip install -r load_testing/requirements.txt
 
-      - name: Reset and seed load-test database
+      - name: Reset and seed load-test database (Railway)
+        if: inputs.provider == 'railway'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           GYD_TARGET_URL: ${{ env.LOAD_TEST_URL || '' }}
@@ -97,6 +114,12 @@ jobs:
           fi
           cd load_testing && python3 seed.py
 
+      - name: Reset and seed load-test database (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          echo "ERROR: Azure provider not yet implemented"
+          exit 1
+
       - name: Run load tests
         env:
           GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
@@ -104,7 +127,7 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
-          GYD_PLATFORM_NAME: railway
+          GYD_PLATFORM_NAME: ${{ inputs.provider }}
           GYD_DB_TYPE: postgres
           GYD_RESULTS_DIR: results
           HONEYCOMB_API_KEY: ${{ secrets.HONEYCOMB_API_KEY }}
