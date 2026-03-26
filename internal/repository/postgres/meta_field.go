@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/gatheryourdeals/data/internal/model"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const metaColumns = "field_name, description, field_type, native"
@@ -30,6 +32,10 @@ func (r *MetaFieldRepo) CreateField(ctx context.Context, field *model.MetaField)
 	_, err := r.db.conn.ExecContext(ctx, query,
 		field.FieldName, field.Description, field.FieldType, native)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return model.ErrMetaFieldExists
+		}
 		return fmt.Errorf("create meta field: %w", err)
 	}
 	return nil
