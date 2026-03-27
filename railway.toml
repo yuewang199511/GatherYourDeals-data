@@ -6,5 +6,3 @@ healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 
-[deploy.multiRegionConfig.us-west2]
-numReplicas = 2

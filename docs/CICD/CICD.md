@@ -6,6 +6,23 @@
 feature/* ──PR──► develop ──PR──► main
 ```
 
+- `feature/*`: open — PRs target `develop`
+- `develop`: protected — required checks must pass; must be up to date before merge
+- `main`: protected — must come from `develop`; required checks must pass; must be up to date before merge
+
+## Required Checks Per Branch
+
+| Check | develop | main |
+|---|---|---|
+| `integration` (Integration Tests) | ✅ required | ✅ required |
+| `test` (Go unit tests + race detector) | ✅ required | ✅ required |
+| `Docker Build` | ✅ required | ✅ required |
+| `Linting & Format Check` (golangci-lint) | ✅ required | ✅ required |
+| `check-source-branch` (must come from develop) | — | ✅ required |
+
+Both branches have `strict: true` — the PR branch must include all latest changes from the base branch before checks are considered valid. This ensures CI always runs on the merged result.
+
+
 ## Workflow Triggers
 
 | File | Trigger | Purpose |
@@ -29,5 +46,5 @@ The `load-tests.yml` workflow supports two providers via `inputs.provider`:
 
 ## Provider-Specific Docs
 
-- Railway → `docs/CICD/railway/` (if present)
+- Railway → `docs/CICD/railway/railway.md`
 - Azure → `docs/CICD/azure/azure.md`

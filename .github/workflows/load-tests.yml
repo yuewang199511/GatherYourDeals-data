@@ -25,7 +25,7 @@ on:
       phase:
         description: "Phase to run — ignored when group is 'all'"
         required: true
-        default: "all"
+        default: "moderate"
         type: choice
         options:
           - all
@@ -53,26 +53,37 @@ jobs:
         if: inputs.provider == 'railway'
         run: npm install -g @railway/cli
 
-      - name: Deploy and resolve load-test URL (Railway)
+      - name: Deploy develop to load-test environment (Railway)
         if: inputs.provider == 'railway'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway up --service "GatherYourDeals-data"
+          railway up \
+            -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
+            -e "load-test" \
+            -s "GatherYourDeals-data" \
+            --detach
+          echo "Deployment triggered. Waiting for health check..."
 
-          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+      - name: Resolve load-test URL (Railway)
+        if: inputs.provider == 'railway'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          # railway domain uses the project token (already scoped to load-test env).
+          # The GraphQL project(id:...) query requires a personal token and fails with project tokens.
           if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
             echo "ERROR: railway domain command failed:"
             echo "$DOMAIN"
             exit 1
           fi
           if [ -z "$DOMAIN" ]; then
-            echo "ERROR: Could not get domain for load-test environment."
+            echo "ERROR: No public domain found for load-test environment."
             railway domain -s "GatherYourDeals-data" --json 2>&1 || true
             exit 1
           fi
 
-          LOAD_TEST_URL="${DOMAIN}"
+          LOAD_TEST_URL="${DOMAIN%/}"
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
 
@@ -215,12 +226,15 @@ jobs:
           GYD_SEED_TIMEOUT: "40"
         run: |
           RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
-          # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment
-          if ! DB_URL=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
+          # Fetch DATABASE_PUBLIC_URL from Railway-injected environment and reset
+          if ! DB_URL=$(railway run \
+              -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
+              -e "load-test" \
+              -s "GatherYourDeals-data" \
+              -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
             echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
             exit 1
           fi
-          # Step 2: run psql directly with the resolved URL
           if ! psql "$DB_URL" -c "$RESET_SQL"; then
             echo "ERROR: Database reset failed"
             exit 1

@@ -118,6 +118,7 @@ Before starting any testing workflow that involves Honeycomb, verify all three p
 
 3. **Load test API key** — `load_testing/.env` must contain `HONEYCOMB_API_KEY` (required for load test event posting).
 
+
 If any prerequisite is missing, stop and notify the user immediately — do not proceed with Honeycomb queries.
 
 # Circuit Breaker Rules
