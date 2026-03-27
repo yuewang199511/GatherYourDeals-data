@@ -9,10 +9,21 @@ All 4 moderate phases (100–400 users) completed with **0% error rate**. All 4 
 # Environment
 
 - **Platform**: Railway (1 replica, `us-west2`)
-- **Database**: PostgreSQL (Railway-managed)
+- **Railway Plan**: Hobby ($5/month, 5-month commitment) — upgraded from free tier to unlock PgBouncer and additional provisioning nodes required for PostgreSQL connection pooling
+- **Database**: PostgreSQL (Railway-managed, via PgBouncer)
 - **Service**: `GatherYourDeals-data` (branch `ci/azure-load-test-v2`)
 - **GitHub Run**: `23626012442` (artifact: `load-test-results-23626012442`)
 - **Results directory**: `load_testing/results/20260327_011016/`
+
+## Infrastructure Cost
+
+| Item | Cost |
+| --- | --- |
+| Railway Hobby plan | $5/month |
+| Commitment | 5 months |
+| **Total committed** | **$25** |
+
+The Hobby plan was required to provision PgBouncer (Railway's managed connection pooler) alongside the PostgreSQL instance. The free tier does not allow additional provisioning nodes needed to run both the app service and the connection pooler simultaneously.
 
 # Performance Result
 
