@@ -23,7 +23,7 @@ on:
           - "3"
           - "4"
       phase:
-        description: "Load test phase (ignored when group is 'all')"
+        description: "Phase to run — ignored when group is 'all'"
         required: true
         default: "moderate"
         type: choice
@@ -215,7 +215,7 @@ jobs:
       - name: Wait for load-test service to be healthy
         run: |
           echo "Polling $LOAD_TEST_URL/health ..."
-          curl --retry 30 --retry-delay 10 --retry-connrefused \
+          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
                --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
 
       - name: Set up Python
@@ -241,7 +241,7 @@ jobs:
             -e "load-test" \
             -s "GatherYourDeals-data" \
             -- psql "$DATABASE_URL" -c \
-            "TRUNCATE receipts CASCADE; DELETE FROM users WHERE role != 'admin';"
+            "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
           cd load_testing && python3 seed.py
 
       - name: Reset and seed load-test database (Azure)
