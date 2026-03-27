@@ -68,6 +68,28 @@ Triggered manually from GitHub Actions UI.
 4. Runs `run_all.sh` (all 4 Locust groups)
 5. Uploads results as a GitHub Actions artifact (retained 30 days)
 
+## PostgreSQL Connection Architecture
+
+PgBouncer runs in **session mode** between the app and PostgreSQL:
+
+```
+app replica → PgBouncer → PostgreSQL
+```
+
+In session mode each app connection maps 1:1 to a PostgreSQL server connection for its entire lifetime. The app-side pool cap is still required:
+
+- `SetMaxOpenConns(10)` — max server connections per replica
+- `SetMaxIdleConns(5)` — idle connections kept warm
+
+**Pool math (unchanged by PgBouncer session mode):**
+```
+max_open_per_replica = (pg_max_connections - reserved) / num_replicas
+```
+
+With Railway PostgreSQL's `max_connections = 100` and 10 reserved, this supports up to 9 replicas safely.
+
+**Why session mode (not transaction mode):** pgx prepared statements do not survive transaction-mode multiplexing, which would require switching to simple protocol. Session mode avoids this incompatibility.
+
 ## Checklist Before Pushing
 
 - [ ] `RAILWAY_TOKEN` is set in GitHub secrets and scoped to `load-test`
