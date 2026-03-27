@@ -103,15 +103,21 @@ If any are missing, stop immediately and tell the user the exact install command
 Before starting any testing workflow that involves Honeycomb, verify all three prerequisites:
 
 1. **Honeycomb MCP** — run `claude mcp list` and confirm `honeycomb` appears and is connected.
-   If missing, tell the user to run:
+   If missing or showing "Needs authentication", tell the user to run:
    ```
-   claude mcp add honeycomb --transport http https://mcp.honeycomb.io/mcp --header "Authorization: Bearer <KEY_ID>:<SECRET_KEY>"
+   claude mcp remove honeycomb && claude mcp add honeycomb --transport http https://mcp.honeycomb.io/mcp --header "Authorization: Bearer <KEY_ID>:<SECRET_KEY>"
    ```
-   This is a one-time global setup. Stop and wait for the user to complete it.
+   Use a **Management API key** (not an ingest key) — ingest keys are write-only and cannot query data.
+   Key format: `hcamk_<id>:<secret>` from Honeycomb → Team Settings → API Keys → Query permissions.
+
+   **IMPORTANT — session restart required:** MCP tools are registered once at session start. If the MCP was added or re-added during the current session, the tools will NOT be available until the user starts a new Claude Code session. Do not attempt Honeycomb queries in the same session where the MCP was reconfigured — stop and ask the user to restart.
+
+   **Do NOT delegate Honeycomb queries to subagents** — subagents cannot call MCP tools from the parent session context. All Honeycomb tool calls must be made directly by the master agent.
 
 2. **Ingest key** — root `.env` must contain `OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<key>` (required for the service to send traces).
 
 3. **Load test API key** — `load_testing/.env` must contain `HONEYCOMB_API_KEY` (required for load test event posting).
+
 
 If any prerequisite is missing, stop and notify the user immediately — do not proceed with Honeycomb queries.
 
@@ -133,6 +139,10 @@ This applies to all agents and subagents.
 # Autonomy Boundary Map
 
 These rules govern how much agents can act independently versus when they must stop and involve the user.
+
+# IMPORTANT FOR GIT
+
+PELASE ALWAYS CHECK IF BRANCH IS UPDATE WITH TARGET IF YOU HAVE PR!!!
 
 ## During Execution
 Run uninterrupted. Do not pause to ask questions mid-task unless blocked.

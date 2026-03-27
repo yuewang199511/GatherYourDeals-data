@@ -22,6 +22,7 @@ feature/* ──PR──► develop ──PR──► main
 
 Both branches have `strict: true` — the PR branch must include all latest changes from the base branch before checks are considered valid. This ensures CI always runs on the merged result.
 
+
 ## Workflow Triggers
 
 | File | Trigger | Purpose |

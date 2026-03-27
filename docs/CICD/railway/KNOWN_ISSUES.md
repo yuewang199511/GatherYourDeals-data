@@ -90,3 +90,29 @@ if ! railway run --service "..." -- psql "$DATABASE_PUBLIC_URL" -c "$RESET_SQL";
 fi
 ```
 The `if !` guard also prevents silent exit under `set -e`. This was present in both `integration-tests.yml` and `load-tests.yml`.
+
+### 10. `railway link` returns "Unauthorized" after CLI version upgrade — not a token problem
+
+After a Railway CLI version upgrade, `railway link "<project-id>"` (positional arg) returns `Unauthorized` instead of a helpful "unrecognized argument" error. This looks like a token issue but is actually a CLI breaking change.
+
+**Diagnosis:** If `railway whoami` succeeds locally but `railway link "<id>"` returns `Unauthorized` in CI, it is the CLI syntax that changed, not the token.
+
+**Fix:** Remove `railway link` entirely. Project tokens already carry project/environment context. Use service-name flags directly:
+```bash
+railway up --service "GatherYourDeals-data"
+railway domain -s "GatherYourDeals-data" --json
+railway run --service "GatherYourDeals-data" -- <cmd>
+```
+
+### 11. Concurrent load test runs exhaust PostgreSQL connection limit
+
+If two load test workflow runs trigger against the same Railway environment simultaneously, the Go service connection pools across both runs exceed Railway PostgreSQL's connection limit (`FATAL: sorry, too many clients already`).
+
+**Cause:** Per-run-id concurrency groups allow parallel runs; each run opens its own connection pool against the shared PostgreSQL instance.
+
+**Fix:** Use per-provider concurrency group (not per-run-id) so Railway runs serialize:
+```yaml
+concurrency:
+  group: ${{ inputs.provider }}-load-test
+  cancel-in-progress: false
+```

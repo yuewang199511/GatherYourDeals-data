@@ -35,12 +35,14 @@ on:
 jobs:
   load-test:
     runs-on: ubuntu-latest
+    # Azure needs more time: Terraform + PostgreSQL provisioning takes 8-15 min
     timeout-minutes: 60
 
-    # Each manually-triggered run gets its own concurrency slot — no silent drops.
-    # workflow_dispatch means human intent per trigger; we never want to queue-cancel a waiting run.
+    # Serialize per provider — both Railway and Azure load tests share the same
+    # environment resources (PostgreSQL, replicas). Parallel runs would corrupt data
+    # and hit connection limits. workflow_dispatch is manual so pile-ups are rare.
     concurrency:
-      group: ${{ inputs.provider }}-load-test-${{ github.run_id }}
+      group: ${{ inputs.provider }}-load-test
       cancel-in-progress: false
 
     steps:
@@ -68,35 +70,20 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
-          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
-
-          ENV_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg pid "$PROJECT_ID" \
-              '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          ENV_ID=$(echo "$ENV_RESP" | jq -r \
-            '.data.project.environments.edges[] | select(.node.name == "load-test") | .node.id')
-
-          DOMAIN_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
-              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
-            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
-
+          # railway domain uses the project token (already scoped to load-test env).
+          # The GraphQL project(id:...) query requires a personal token and fails with project tokens.
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
+            exit 1
+          fi
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: No public domain found for load-test environment."
+            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
             exit 1
           fi
 
-          LOAD_TEST_URL="https://${DOMAIN}"
+          LOAD_TEST_URL="${DOMAIN%/}"
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
 
@@ -235,13 +222,23 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_SEED_WORKERS: "10"
+          GYD_SEED_TIMEOUT: "40"
         run: |
-          railway run \
-            -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
-            -e "load-test" \
-            -s "GatherYourDeals-data" \
-            -- psql "$DATABASE_URL" -c \
-            "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          # Fetch DATABASE_PUBLIC_URL from Railway-injected environment and reset
+          if ! DB_URL=$(railway run \
+              -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
+              -e "load-test" \
+              -s "GatherYourDeals-data" \
+              -- sh -c 'echo "$DATABASE_PUBLIC_URL"'); then
+            echo "ERROR: Failed to fetch DATABASE_PUBLIC_URL from Railway"
+            exit 1
+          fi
+          if ! psql "$DB_URL" -c "$RESET_SQL"; then
+            echo "ERROR: Database reset failed"
+            exit 1
+          fi
           cd load_testing && python3 seed.py
 
       - name: Reset and seed load-test database (Azure)
@@ -303,7 +300,7 @@ jobs:
           if [ -f terraform.tfstate ]; then
             terraform destroy -auto-approve || true
           fi
-          # Backstop: az group delete cascades to ACI and any orphaned resources
+          # Backstop: az group delete cascades to Container Apps and any orphaned resources
           az group delete \
             --name "gyd-lt-${{ github.run_id }}" \
             --yes --no-wait 2>/dev/null || true

@@ -90,6 +90,7 @@ With Railway PostgreSQL's `max_connections = 100` and 10 reserved, this supports
 
 **Why session mode (not transaction mode):** pgx prepared statements do not survive transaction-mode multiplexing, which would require switching to simple protocol. Session mode avoids this incompatibility.
 
+
 ## Checklist Before Pushing
 
 - [ ] `RAILWAY_TOKEN` is set in GitHub secrets and scoped to `load-test`
