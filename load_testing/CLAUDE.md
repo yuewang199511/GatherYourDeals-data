@@ -29,6 +29,21 @@ Do not touch local service or snapshot.
 Verify the remote service is healthy before running tests: `curl -sf {GYD_TARGET_URL}/health`
 If the health check fails, stop and report to the user — do not proceed.
 
+## Remote seeding strategy
+
+When seeding against a remote provider (Railway, Azure), the correct fix for seed timeouts is **reducing workers**, not increasing timeout:
+
+| Symptom | Wrong fix | Right fix |
+|---|---|---|
+| `ReadTimeout` during seeding | Increase `GYD_SEED_TIMEOUT` | Reduce `GYD_SEED_WORKERS` |
+| Seed completes but slow | Increase workers | Acceptable — seed is pre-test only |
+
+**Why:** Remote services have CPU/connection limits. High concurrency (10 workers default) can saturate a single-instance Railway service or exhaust PostgreSQL connections. 3 workers is the validated safe value for Railway hobby/single-instance.
+
+Increasing timeout alone does not fix the root cause (CPU saturation) — it just makes each timed-out request wait longer before failing.
+
+**Configured values for Railway CI:** `GYD_SEED_WORKERS=3`, `GYD_SEED_TIMEOUT=30` (set in workflow env).
+
 # Test Execution Order
 
 Always run in this order — do not run load tests if integration tests fail:
