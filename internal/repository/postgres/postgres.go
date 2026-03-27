@@ -32,6 +32,8 @@ func New(dsn string) (*DB, error) {
 	if err := conn.Ping(); err != nil {
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
+	conn.SetMaxOpenConns(10)
+	conn.SetMaxIdleConns(5)
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
