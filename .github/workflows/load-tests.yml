@@ -68,35 +68,18 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          PROJECT_ID="7639518c-e0a7-4cd4-8227-6c2575458620"
-          SERVICE_ID="b491569f-4c17-4e1d-a813-b8c5e73f4d6c"
-
-          ENV_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg pid "$PROJECT_ID" \
-              '{query:"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}",variables:{id:$pid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          ENV_ID=$(echo "$ENV_RESP" | jq -r \
-            '.data.project.environments.edges[] | select(.node.name == "load-test") | .node.id')
-
-          DOMAIN_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg sid "$SERVICE_ID" --arg eid "$ENV_ID" \
-              '{query:"query($sid:String!,$eid:String!){serviceInstance(serviceId:$sid,environmentId:$eid){domains{serviceDomains{domain}}}}",variables:{sid:$sid,eid:$eid}}')" \
-            https://backboard.railway.app/graphql/v2)
-
-          DOMAIN=$(echo "$DOMAIN_RESP" | jq -r \
-            '.data.serviceInstance.domains.serviceDomains[0].domain // empty')
+          # railway domain uses the project token (already scoped to load-test env).
+          # The GraphQL project(id:...) query requires a personal token and fails with project tokens.
+          DOMAIN=$(railway domain -s "GatherYourDeals-data" --json | jq -r '.domains[0] // empty')
 
           if [ -z "$DOMAIN" ]; then
             echo "ERROR: No public domain found for load-test environment."
+            railway domain -s "GatherYourDeals-data" --json || true
             exit 1
           fi
 
-          LOAD_TEST_URL="https://${DOMAIN}"
+          # Strip trailing slash if present; domain already includes https://
+          LOAD_TEST_URL="${DOMAIN%/}"
           echo "LOAD_TEST_URL=$LOAD_TEST_URL" >> $GITHUB_ENV
           echo "Load-test URL: $LOAD_TEST_URL"
 
