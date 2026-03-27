@@ -38,7 +38,7 @@ _RECEIPT_PAYLOAD = {
 # ---------------------------------------------------------------------------
 
 def test_health(config):
-    resp = requests.get(f"{config['base_url']}/health", timeout=10)
+    resp = requests.get(f"{config['base_url']}/health", timeout=30)
     assert resp.status_code == 200
     assert resp.json().get("status") == "ok"
 
@@ -51,7 +51,7 @@ def test_register_success(config):
     resp = requests.post(
         f"{config['base_url']}/api/v1/users",
         json={"username": _unique_username(), "password": "testpassword1"},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -62,8 +62,8 @@ def test_register_success(config):
 def test_register_duplicate(config):
     username = _unique_username()
     payload = {"username": username, "password": "testpassword1"}
-    requests.post(f"{config['base_url']}/api/v1/users", json=payload, timeout=10)
-    resp = requests.post(f"{config['base_url']}/api/v1/users", json=payload, timeout=10)
+    requests.post(f"{config['base_url']}/api/v1/users", json=payload, timeout=30)
+    resp = requests.post(f"{config['base_url']}/api/v1/users", json=payload, timeout=30)
     assert resp.status_code == 409
 
 
@@ -75,7 +75,7 @@ def test_login_success(config, user_session):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/login",
         json={"username": config["username"], "password": config["password"]},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -87,7 +87,7 @@ def test_login_wrong_password(config, user_session):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/login",
         json={"username": config["username"], "password": "definitelywrong"},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 401
 
@@ -100,7 +100,7 @@ def test_me_success(config, user_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/auth/me",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -109,7 +109,7 @@ def test_me_success(config, user_session):
 
 
 def test_me_unauthenticated(config):
-    resp = requests.get(f"{config['base_url']}/api/v1/auth/me", timeout=10)
+    resp = requests.get(f"{config['base_url']}/api/v1/auth/me", timeout=30)
     assert resp.status_code == 401
 
 
@@ -121,7 +121,7 @@ def test_refresh_success(config, user_token_pair):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/refresh",
         json={"refresh_token": user_token_pair["refresh_token"]},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -133,7 +133,7 @@ def test_refresh_invalid_token(config):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/refresh",
         json={"refresh_token": "this-is-not-a-valid-token"},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 401
 
@@ -148,14 +148,14 @@ def test_logout_success(config, user_token_pair):
         f"{config['base_url']}/api/v1/auth/logout",
         json={"refresh_token": user_token_pair["refresh_token"]},
         headers=user_token_pair["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
 
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/refresh",
         json={"refresh_token": user_token_pair["refresh_token"]},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 401
 
@@ -169,7 +169,7 @@ def test_create_receipt_success(config, user_session):
         f"{config['base_url']}/api/v1/receipts",
         json=_RECEIPT_PAYLOAD,
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 201
     assert "id" in resp.json()
@@ -179,7 +179,7 @@ def test_create_receipt_unauthenticated(config):
     resp = requests.post(
         f"{config['base_url']}/api/v1/receipts",
         json=_RECEIPT_PAYLOAD,
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 401
 
@@ -188,7 +188,7 @@ def test_list_receipts_success(config, user_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/receipts",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -201,7 +201,7 @@ def test_get_receipt_success(config, user_session):
         f"{config['base_url']}/api/v1/receipts",
         json=_RECEIPT_PAYLOAD,
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert create.status_code == 201
     receipt_id = create.json()["id"]
@@ -209,7 +209,7 @@ def test_get_receipt_success(config, user_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/receipts/{receipt_id}",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     assert resp.json()["id"] == receipt_id
@@ -219,7 +219,7 @@ def test_get_receipt_not_found(config, user_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/receipts/nonexistent-id-that-does-not-exist",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 404
 
@@ -229,7 +229,7 @@ def test_delete_receipt_success(config, user_session):
         f"{config['base_url']}/api/v1/receipts",
         json=_RECEIPT_PAYLOAD,
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert create.status_code == 201
     receipt_id = create.json()["id"]
@@ -237,14 +237,14 @@ def test_delete_receipt_success(config, user_session):
     resp = requests.delete(
         f"{config['base_url']}/api/v1/receipts/{receipt_id}",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
 
     resp = requests.get(
         f"{config['base_url']}/api/v1/receipts/{receipt_id}",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 404
 
@@ -257,7 +257,7 @@ def test_list_users_admin(config, admin_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/users",
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -269,7 +269,7 @@ def test_list_users_forbidden(config, user_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/users",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 403
 
@@ -279,14 +279,14 @@ def test_delete_user_success(config, admin_session):
     reg = requests.post(
         f"{config['base_url']}/api/v1/users",
         json={"username": username, "password": "throwaway1"},
-        timeout=10,
+        timeout=30,
     )
     assert reg.status_code == 201
 
     list_resp = requests.get(
         f"{config['base_url']}/api/v1/users",
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert list_resp.status_code == 200
     users = list_resp.json()["data"]
@@ -296,7 +296,7 @@ def test_delete_user_success(config, admin_session):
     resp = requests.delete(
         f"{config['base_url']}/api/v1/users/{user_id}",
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
 
@@ -309,7 +309,7 @@ def test_list_meta_success(config, user_session):
     resp = requests.get(
         f"{config['base_url']}/api/v1/meta",
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -323,7 +323,7 @@ def test_create_meta_field_success(config, admin_session):
         f"{config['base_url']}/api/v1/meta",
         json={"fieldName": field_name, "description": "integration test field", "type": "string"},
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 201
 
@@ -332,7 +332,7 @@ def test_create_meta_field_unauthenticated(config):
     resp = requests.post(
         f"{config['base_url']}/api/v1/meta",
         json={"fieldName": _unique_field_name(), "description": "should be rejected", "type": "string"},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 401
 
@@ -343,7 +343,7 @@ def test_update_meta_field_success(config, admin_session):
         f"{config['base_url']}/api/v1/meta",
         json={"fieldName": field_name, "description": "original description", "type": "string"},
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert create.status_code == 201
 
@@ -351,7 +351,7 @@ def test_update_meta_field_success(config, admin_session):
         f"{config['base_url']}/api/v1/meta/{field_name}",
         json={"description": "updated description"},
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200
 
@@ -362,7 +362,7 @@ def test_update_meta_field_forbidden(config, user_session, admin_session):
         f"{config['base_url']}/api/v1/meta",
         json={"fieldName": field_name, "description": "for forbidden test", "type": "string"},
         headers=admin_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert create.status_code == 201
 
@@ -370,6 +370,6 @@ def test_update_meta_field_forbidden(config, user_session, admin_session):
         f"{config['base_url']}/api/v1/meta/{field_name}",
         json={"description": "should be forbidden"},
         headers=user_session["headers"],
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 403

@@ -149,6 +149,23 @@ Every key in `extras` must be registered in the `meta_fields` table before it ca
 
 Schema is managed by [goose](https://github.com/pressly/goose). Migration files live in `repository/sqlite/migrations/` as plain SQL with `-- +goose Up` / `-- +goose Down` annotations. They are embedded into the binary at compile time via `go:embed`, so no extra files need to be deployed. To add a new table, create a new numbered SQL file.
 
+## PostgreSQL Connection Pool Sizing
+
+The PostgreSQL driver (`database/sql`) defaults to unlimited open connections. Without a cap, each replica opens as many connections as concurrent requests demand, which exhausts PostgreSQL's `max_connections` limit when running multiple replicas.
+
+The app sets a fixed pool cap in `internal/repository/postgres/postgres.go`:
+- `SetMaxOpenConns(10)` — maximum simultaneous connections per replica
+- `SetMaxIdleConns(5)` — idle connections kept warm
+
+**Why 10:** With Railway PostgreSQL's `max_connections = 100` and 10 reserved for CI tooling and migrations, this supports up to 9 replicas safely: `(100 - 10) / 10 = 9`. Chosen to be scale-safe without needing reconfiguration as replicas are added.
+
+**The general formula for any deployment:**
+```
+max_open_per_replica = (pg_max_connections - reserved) / num_replicas
+```
+
+**PgBouncer (session mode):** A PgBouncer instance sits between the app and PostgreSQL. The app connects to PgBouncer; PgBouncer manages the actual PostgreSQL connections. In **session mode**, each app connection maps 1:1 to a PostgreSQL server connection for the entire session lifetime — so the app-side pool limits above still apply and must be set correctly. The pool math is unchanged; PgBouncer adds a stable connection endpoint and connection queuing, but does not reduce the total number of server connections. Transaction mode would decouple the math, but session mode is used to preserve compatibility with pgx prepared statements.
+
 ## Dependency Wiring
 
 Dependencies are created in the command functions and passed explicitly through constructors — no global singletons. The wiring order is: database → repository → service/token-service → handler → router.

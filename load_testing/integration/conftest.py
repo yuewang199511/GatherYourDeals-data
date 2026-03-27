@@ -32,7 +32,7 @@ def _login(base_url, username, password, label, test_run_id=None):
     resp = requests.post(
         f"{base_url}/api/v1/auth/login",
         json={"username": username, "password": password},
-        timeout=10,
+        timeout=30,
     )
     if resp.status_code != 200:
         pytest.exit(
@@ -131,7 +131,7 @@ def user_session(config):
     resp = requests.post(
         f"{base_url}/api/v1/users",
         json={"username": username, "password": password},
-        timeout=10,
+        timeout=30,
     )
     if resp.status_code not in (201, 409):
         pytest.exit(
@@ -180,7 +180,7 @@ def user_token_pair(config):
     resp = requests.post(
         f"{base_url}/api/v1/auth/login",
         json={"username": config["username"], "password": config["password"]},
-        timeout=10,
+        timeout=30,
     )
     assert resp.status_code == 200, (
         f"user_token_pair: login failed: HTTP {resp.status_code} — {resp.text[:200]}"
