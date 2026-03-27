@@ -64,8 +64,13 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           # Inject replica count into railway.toml before deploying.
-          # [deploy] is the last section in the file so appending is safe.
-          echo "numReplicas = ${{ inputs.replicas }}" >> railway.toml
+          # Upsert: replace existing numReplicas if present, otherwise append.
+          # [deploy] is the last section so a plain append lands in the right section.
+          if grep -q "^numReplicas" railway.toml; then
+            sed -i "s/^numReplicas = .*/numReplicas = ${{ inputs.replicas }}/" railway.toml
+          else
+            echo "numReplicas = ${{ inputs.replicas }}" >> railway.toml
+          fi
           railway up \
             -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
             -e "load-test" \
