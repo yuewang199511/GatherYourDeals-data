@@ -211,8 +211,8 @@ jobs:
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
-          # Reduce concurrency for Railway's single-instance CPU budget
-          GYD_SEED_WORKERS: "3"
+          GYD_SEED_WORKERS: "10"
+          GYD_SEED_TIMEOUT: "40"
         run: |
           RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
           # Step 1: fetch DATABASE_PUBLIC_URL from Railway-injected environment

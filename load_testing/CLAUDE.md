@@ -42,7 +42,9 @@ When seeding against a remote provider (Railway, Azure), the correct fix for see
 
 Increasing timeout alone does not fix the root cause (CPU saturation) — it just makes each timed-out request wait longer before failing.
 
-**Configured values for Railway CI:** `GYD_SEED_WORKERS=3`, `GYD_SEED_TIMEOUT=30` (set in workflow env).
+**Configured values for Railway CI:** `GYD_SEED_WORKERS=10`, `GYD_SEED_TIMEOUT=40` (set in workflow env).
+
+The 3-worker value was a temporary conservative fix while parallel runs were causing resource contention. Once concurrency was serialized per provider, 10 workers is safe. 40s covers Railway's bcrypt login spike (~11s avg moderate, up to ~16s under light load) with headroom.
 
 # Test Execution Order
 
