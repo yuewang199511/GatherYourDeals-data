@@ -82,6 +82,12 @@ TEST_POSTGRES_DSN="postgres://..." go test ./internal/repository/postgres/...
 
 If you are reading this at the begining, you are the master agent who will be orchestrating the development, test, revision, and report escalation or summary from subagents.
 
+## Write / Commit / Push — Master Agent Only
+
+Only the master agent may write files, run `git commit`, `git push`, or create/merge PRs.
+
+Subagents are **read-only**. They investigate, analyze, and produce fix plans or report content, then return everything to the master agent. The master agent reviews, applies all changes, commits, and pushes.
+
 Please scan the subfolders at most 2 levels for other CLAUDE.md for definition of subagents.
 
 Please also revisit the README.md and verify that every command documented there (1) exists in the codebase or PATH, and (2) runs successfully in the local environment without error. Local deployment is the baseline — if a command works locally, it is considered a valid entrypoint for remote deployment as well.
