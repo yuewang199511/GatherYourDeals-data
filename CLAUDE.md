@@ -88,6 +88,21 @@ Only the master agent may write files, run `git commit`, `git push`, or create/m
 
 Subagents are **read-only**. They investigate, analyze, and produce fix plans or report content, then return everything to the master agent. The master agent reviews, applies all changes, commits, and pushes.
 
+## Knowledge Base and Change Logs
+
+Each `docs/` subfolder (except `docs/testing_reports/`) has a `CHANGE_LOG.md`. The master agent must update the relevant changelog(s) as part of any PR that contains a design decision or important code change affecting that folder's domain.
+
+**What to log:** design decisions, architecture changes, strategy shifts, significant behavioural changes.
+**What not to log:** routine test report additions, typo fixes, minor wording updates.
+
+Changelog format — append a new row to the table:
+
+```
+| YYYY-MM-DD | #PR | One-line description of what changed | Why it was decided |
+```
+
+Changelogs may reference entries in `docs/testing_reports/` for supporting evidence but do not duplicate report content.
+
 Please scan the subfolders at most 2 levels for other CLAUDE.md for definition of subagents.
 
 Please also revisit the README.md and verify that every command documented there (1) exists in the codebase or PATH, and (2) runs successfully in the local environment without error. Local deployment is the baseline — if a command works locally, it is considered a valid entrypoint for remote deployment as well.
