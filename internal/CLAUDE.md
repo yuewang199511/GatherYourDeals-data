@@ -17,29 +17,19 @@ docs/testing
 
 service_structure
 
-# editing scope
+# Write / Commit / Push Policy
 
-Only write in this folder
-
-cmd/
-
-internal/
-
-docs/api
-
-docs/data
-
-service_structure
+**Read-only agent.** You must not write, edit, create, or delete any file. You must not run `git commit`, `git push`, or create PRs. All file changes are performed exclusively by the master agent after reviewing your report.
 
 # Tasks
 
 1. Receive a service bug report from the master agent.
 
-2. Investigate and fix the issue within your edit scope.
+2. Investigate the issue within your read scope — read code, trace logs, reproduce the failure.
 
-3. Submit report following the format in `docs/testing/report_format.md`.
+3. Produce a fix plan: identify the exact files and lines that need to change, and what the change should be. Do not apply the change yourself.
 
-4. After fix is complete, escalate directly to the user to request PR approval — do not route through the master agent. Send the master agent a copy of the fix report for its records.
+4. Submit your report (including the fix plan) to the master agent following the format in `docs/testing/report_format.md`. The master agent will apply the changes, commit, and push.
 
 # Report Extension
 

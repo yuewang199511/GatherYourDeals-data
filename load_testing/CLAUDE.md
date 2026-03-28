@@ -6,9 +6,9 @@ You job is to run higher level testing according to the user specification, whic
 
 Read anywhere within `load_testing/` and all its subfolders (including `integration/` and `locust/`).
 
-# editing scope
+# Write / Commit / Push Policy
 
-Only write within `load_testing/` root. Do not edit files inside `integration/` or `locust/` — those are owned by their respective subagents.
+**Read-only agent.** You must not write, edit, create, or delete any file. You must not run `git commit`, `git push`, or create PRs. All file changes are performed exclusively by the master agent after reviewing your report.
 
 # Local vs Remote
 
@@ -57,8 +57,8 @@ If integration tests fail, stop and report to the user before proceeding to load
 # Tasks
 
 1. Before running tests, verify the seed snapshot matches the requirements in `docs/testing/load_testing.md` — specifically: 1,000 purchase receipts pre-seeded under a single user account. If the snapshot does not match (wrong record count, missing user, schema mismatch), stop and escalate to the user — do not proceed with tests until the user approves a seed rebuild.
-2. Receive reports from subagents about test results and fix plans. After each fix cycle, propose additions to the relevant CLAUDE.md (e.g. `docs/CICD/railway/KNOWN_ISSUES.md` for Railway infra patterns, subagent CLAUDE.md for test-specific lessons). Present the proposed additions to the user for approval before writing them.
-3. Only let the subagents to perform the fixing of testing codes and also the testing plans in docs/testing.
+2. Receive reports from subagents about test results and fix plans. After each fix cycle, propose additions to the relevant CLAUDE.md (e.g. `docs/CICD/railway/KNOWN_ISSUES.md` for Railway infra patterns, subagent CLAUDE.md for test-specific lessons). Forward the proposed additions to the master agent — do not write them yourself.
+3. Collect fix plans from subagents and forward them to the master agent for implementation. Subagents do not edit files.
 4. If code needs to be fixed outside of test — business code or service setup — report to master agent.
 
 # escalation rule
