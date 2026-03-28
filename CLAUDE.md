@@ -208,6 +208,15 @@ These rules govern how much agents can act independently versus when they must s
 
 PLEASE ALWAYS CHECK IF BRANCH IS UP TO DATE WITH TARGET IF YOU HAVE A PR!!!
 
+## Merge strategy
+
+| PR direction | Strategy | Command flag | Reason |
+|---|---|---|---|
+| feature branch → `develop` | Squash | `--squash` | Collapses noisy work-in-progress commits into one clean entry |
+| `develop` → `main` | Merge commit | `--merge` | Preserves shared commit lineage so future develop→main PRs are always clean; squashing here creates diverged histories that cause conflicts |
+
+Never use `--squash` for `develop` → `main`.
+
 ## Pre-merge branch sync check
 
 Before merging any PR (to `develop` or `main`), run:
