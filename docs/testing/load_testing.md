@@ -120,21 +120,6 @@ Kept lower — creates unique field names; high RPS would exhaust the namespace.
 
 ---
 
-## Group 5: Logout (Token-Pool Driven)
-
-Each virtual user consumes one pre-generated token pair and issues a single `POST /auth/logout`. The pool is filled concurrently at startup (default 300 workers, 30 s budget) to avoid blocking the test window.
-
-**Note on token pool:** At 40 RPS stress over 2.5 min, the pool pre-generates ~7,000 tokens. If the fill completes with fewer tokens than targeted, a shortfall warning is printed to stderr, recorded in Locust stats, and written to `context.json`.
-
-### POST /auth/logout
-
-| Phase    | Target RPS | Duration | Load Profile                                 |
-| -------- | ---------- | -------- | -------------------------------------------- |
-| Moderate | 10         | 2 min    | Fixed                                        |
-| Stress   | 40         | 2.5 min  | Ramp from 10 → 40 over 1 min, hold 1.5 min  |
-
----
-
 ## Time Estimates Per Platform
 
 | Scope              | Groups | Time per group | Total      |
