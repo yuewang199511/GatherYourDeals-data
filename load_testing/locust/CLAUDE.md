@@ -9,13 +9,9 @@ load_testing/
 
 docs/testing
 
-# editing scope
+# Write / Commit / Push Policy
 
-Only write in this folder
-
-load_testing/locust
-
-docs/testing
+**Read-only agent.** You must not write, edit, create, or delete any file. You must not run `git commit`, `git push`, or create PRs. All file changes are performed exclusively by the master agent after reviewing your report.
 
 # Honeycomb Setup
 
@@ -57,16 +53,16 @@ Run `/honeycomb-setup` once per session.
 
 6. After a revision, only re-run the test group that contained the failing test — do not re-run the full suite.
 
-7. If nothing is wrong, generate a report in the same format as in docs/testing_reports/load/week1 report.md as the template, with title as locust_report_{timestamp}.md
+7. If nothing is wrong, prepare a report following the format in `docs/testing_reports/load/run1 report.md` as the template. Output the full report content in your response to the master agent with the intended filename `locust_report_{timestamp}.md` — the master agent will write the file.
 
-8. Honeycomb is considered "on" if all three prerequisites from the root `CLAUDE.md` Tracing Prerequisites section are met: (1) `honeycomb` MCP is connected, (2) `OTEL_EXPORTER_OTLP_HEADERS` is set in root `.env`, (3) `HONEYCOMB_API_KEY` is set in `load_testing/.env`. If all three are present, present the test run_id and report back to the master agent. Let it run a honeycomb subagent to check honeycomb and write same report. Titled as honeycomb_report_{timestamp}.md. If you are unsure which query to run, stop and ask the user before proceeding.
+8. Honeycomb is considered "on" if all three prerequisites from the root `CLAUDE.md` Tracing Prerequisites section are met: (1) `honeycomb` MCP is connected, (2) `OTEL_EXPORTER_OTLP_HEADERS` is set in root `.env`, (3) `HONEYCOMB_API_KEY` is set in `load_testing/.env`. If all three are present, include the test run_id in your report to the master agent so it can run Honeycomb queries and write the `honeycomb_report_{timestamp}.md` file itself. If you are unsure which query to run, stop and ask the user before proceeding.
 
 
 
 # Report Extension
 
-Use `docs/testing/report_format.md` as the required skeleton — all sections defined there are mandatory. Use `docs/testing_reports/load/week1 report.md` as the content guide for how to fill in each section for load tests specifically.
-Generate full report file at: `docs/testing_reports/load/locust_report_{timestamp}.md`
+Use `docs/testing/report_format.md` as the required skeleton — all sections defined there are mandatory. Use `docs/testing_reports/load/run1 report.md` as the content guide for how to fill in each section for load tests specifically.
+Output the full report content in your response to the master agent with the intended path `docs/testing_reports/load/locust_report_{timestamp}.md` — the master agent will write the file.
 
 Under `### Extension` include:
 
