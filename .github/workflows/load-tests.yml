@@ -31,6 +31,11 @@ on:
           - all
           - moderate
           - stress
+      replicas:
+        description: "Number of Railway replicas to deploy (Railway provider only)"
+        required: false
+        default: "1"
+        type: string
 
 jobs:
   load-test:
@@ -58,12 +63,20 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
+          # Inject replica count into railway.toml before deploying.
+          # Upsert: replace existing numReplicas if present, otherwise append.
+          # [deploy] is the last section so a plain append lands in the right section.
+          if grep -q "^numReplicas" railway.toml; then
+            sed -i "s/^numReplicas = .*/numReplicas = ${{ inputs.replicas }}/" railway.toml
+          else
+            echo "numReplicas = ${{ inputs.replicas }}" >> railway.toml
+          fi
           railway up \
             -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
             -e "load-test" \
             -s "GatherYourDeals-data" \
             --detach
-          echo "Deployment triggered. Waiting for health check..."
+          echo "Deployment triggered with ${{ inputs.replicas }} replica(s). Waiting for health check..."
 
       - name: Resolve load-test URL (Railway)
         if: inputs.provider == 'railway'

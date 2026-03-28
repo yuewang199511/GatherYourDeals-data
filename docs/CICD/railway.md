@@ -59,14 +59,48 @@ Both pre-merge (PR) and post-merge (push to develop) deploy to the same `load-te
 
 Triggered manually from GitHub Actions UI.
 
-**Inputs:** `phase`: `moderate` (default) or `stress`
+**Inputs:**
+
+| Input | Default | Notes |
+|---|---|---|
+| `provider` | `railway` | `railway` or `azure` |
+| `group` | `all` | `all` or group number `1`–`4` |
+| `phase` | `moderate` | `moderate`, `stress`, or `all` |
+| `replicas` | `1` | Number of Railway replicas to deploy |
 
 **What it does:**
-1. Deploys current branch to load-test
-2. Resets the database: `TRUNCATE receipts CASCADE; DELETE FROM users WHERE role != 'admin'`
-3. Re-seeds 1,000 receipts via `seed.py`
-4. Runs `run_all.sh` (all 4 Locust groups)
-5. Uploads results as a GitHub Actions artifact (retained 30 days)
+1. Injects `numReplicas` into `railway.toml` (upsert — workflow input always wins over any value in the file)
+2. Deploys current branch to load-test
+3. Resets the database: `TRUNCATE receipts CASCADE; DELETE FROM users WHERE role != 'admin'`
+4. Re-seeds 1,000 receipts via `seed.py`
+5. Runs `run_all.sh` (all 4 Locust groups)
+6. Uploads results as a GitHub Actions artifact (retained 30 days)
+
+## Replica Scaling
+
+Replica count is controlled via the `replicas` workflow input, not the Railway dashboard or `railway.toml` directly. This allows different replica counts per test run without touching infrastructure config.
+
+**How it works:** The deploy step runs a TOML upsert before `railway up`:
+```bash
+if grep -q "^numReplicas" railway.toml; then
+  sed -i "s/^numReplicas = .*/numReplicas = N/" railway.toml
+else
+  echo "numReplicas = N" >> railway.toml
+fi
+```
+
+The workflow input always wins — if `numReplicas` is already in `railway.toml`, it gets replaced. If absent, it gets appended to the `[deploy]` section (which is last in the file).
+
+**Connection pool headroom by replica count:**
+
+| Replicas | Connections used | Headroom (max 100) |
+|---|---|---|
+| 1 | 10 + ~3 CI/goose | 87 |
+| 2 | 20 + ~3 CI/goose | 77 |
+| 5 | 50 + ~3 CI/goose | 47 |
+| 9 | 90 + ~3 CI/goose | 7 (limit) |
+
+`SetMaxOpenConns(10)` per replica. Do not exceed 9 replicas without increasing Railway PostgreSQL's `max_connections`.
 
 ## PostgreSQL Connection Architecture
 
