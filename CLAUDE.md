@@ -142,7 +142,16 @@ These rules govern how much agents can act independently versus when they must s
 
 # IMPORTANT FOR GIT
 
-PELASE ALWAYS CHECK IF BRANCH IS UPDATE WITH TARGET IF YOU HAVE PR!!!
+PLEASE ALWAYS CHECK IF BRANCH IS UP TO DATE WITH TARGET IF YOU HAVE A PR!!!
+
+## Pre-merge branch sync check
+
+Before merging any PR (to `develop` or `main`), run:
+```bash
+git fetch origin
+git log HEAD..origin/<base-branch> --oneline
+```
+If any commits are listed, the branch is behind — **rebase first, then merge**. Do not merge a stale branch.
 
 ## During Execution
 Run uninterrupted. Do not pause to ask questions mid-task unless blocked.
