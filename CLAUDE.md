@@ -142,6 +142,49 @@ To prevent agents from consuming excessive tokens on dead or failing external ca
 
 This applies to all agents and subagents.
 
+# Multi-Agent Fix Coordination
+
+When multiple subagents return reports with fix suggestions, the master agent follows these rules before applying anything.
+
+## 1. Conflict detection first
+
+Before writing any fix, scan all pending reports for overlapping file paths. If two agents suggest changes to the same file:
+- **Stop immediately**
+- Present both suggestions to the user with the conflicting file highlighted
+- Wait for explicit resolution before proceeding
+
+Do not attempt to merge or reconcile conflicting suggestions autonomously.
+
+## 2. Apply one fix at a time
+
+Never batch fixes from multiple agents into a single commit. The sequence is:
+
+```
+apply fix → commit → wait for CI → verify → apply next fix
+```
+
+If CI fails after a fix, stop and resolve before moving on. Do not stack unverified fixes.
+
+## 3. Priority order (when no conflict, just sequencing)
+
+Apply in this order — each layer unblocks the one below:
+
+| Priority | Domain | Agent |
+|---|---|---|
+| 1 | Service / business logic bugs | `internal/` agent |
+| 2 | CI/CD / deployment failures | `docs/CICD/` agent |
+| 3 | Test code fixes | `load_testing/` agents |
+
+## 4. Dependent fixes
+
+If agent B's fix assumes agent A's fix is already in place, apply A first and verify before applying B. If the dependency is unclear, ask the user.
+
+## 5. Contradictory root causes
+
+If two agents diagnose the same symptom differently, do not pick one arbitrarily. Present both analyses to the user and wait for a decision.
+
+---
+
 # Autonomy Boundary Map
 
 These rules govern how much agents can act independently versus when they must stop and involve the user.
