@@ -1,6 +1,6 @@
 # Summary
 
-This article records the load testing results from week #1, recorded by Locust.
+This article records the load testing results from run #1, recorded by Locust.
 
 Service was set up as a local SQLite-backed Gin service running in Docker Compose.
 
