@@ -16,8 +16,9 @@
 
 name: gyd-lt
 location: westus3
+type: Microsoft.App/containerApps
 properties:
-  environmentId: __ENV_ID__
+  managedEnvironmentId: __ENV_ID__
   configuration:
     registries:
       - server: gydltpersistent.azurecr.io
