@@ -15,3 +15,12 @@ Design decisions and significant infrastructure changes. Routine report addition
 | 2026-03-28 | #89 | Added pre-merge branch sync check rule to CLAUDE.md | Prevent merging stale branches; enforces `git fetch + git log HEAD..origin/<base>` before every merge |
 | 2026-03-28 | #91 | Subagents made read-only; only master agent writes/commits/pushes | Prevent concurrent file mutations from multiple agents; single write path simplifies audit trail |
 | 2026-03-28 | #93 | Added multi-agent fix coordination rules | Define conflict detection, one-fix-at-a-time sequencing, and priority order for simultaneous subagent reports |
+| 2026-03-28 | — | Switched Azure PostgreSQL to persistent VNet-private instance | Eliminate 8-15 min provisioning wait per CI run; ~$19/mo persistent cost vs repeated wait |
+| 2026-03-28 | — | Added Container Apps VNet integration | Container Apps must reach private PostgreSQL via gyd-vnet; subnet-apps delegated to Microsoft.App/environments |
+| 2026-03-28 | — | Replaced direct psql DB reset with Container App Job | CI runner cannot reach VNet-private PostgreSQL; job runs inside VNet instead |
+| 2026-03-28 | — | Updated Container App CPU/memory to 4.0 vCPU / 8.0 Gi | Approximate Railway's 8 vCPU / 8 GB resource limit (Consumption plan max is 4 vCPU) |
+| 2026-03-29 | — | Replaced az acr build with docker build + docker push | ACR Tasks blocked by subscription policy (TasksOperationsNotAllowed); local runner build avoids it |
+| 2026-03-29 | — | Made otel-headers Container App secret conditional | Empty OTEL_EXPORTER_OTLP_HEADERS secret caused ContainerAppSecretInvalid; skip secret when unset |
+| 2026-03-29 | — | Added pre-provision subnet cleanup + synchronous teardown | ManagedEnvironmentSubnetInUse blocked new runs; --no-wait teardown left subnet occupied; now waits for full deletion |
+| 2026-03-29 | — | Bypass private DNS resolution — use PostgreSQL private IP from DNS zone | Container Apps DNS (127.0.0.11) cannot resolve private DNS zones; resolve IP at CI time and inject directly into DSN |
+| 2026-03-29 | #102 | Made ACR + Container App Environment + Container App persistent | All resources scale to 0 when idle (no cost); eliminates subnet conflict cleanup, provision wait, and 10+ min teardown per run |
