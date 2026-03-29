@@ -106,6 +106,40 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
   name: 'gatheryourdeals'
 }
 
+// ── PgBouncer (built-in connection pooler) ────────────────────────────────────
+// Mirrors Railway's PgBouncer setup so the two environments are comparable.
+// Session mode is compatible with pgx v5 extended query protocol (no driver changes).
+// Clients connect on port 6432; direct PostgreSQL port 5432 remains available.
+// Does NOT require a server restart — applied dynamically.
+resource pgbouncerEnabled 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'pgbouncer.enabled'
+  properties: {
+    value: 'true'
+    source: 'user-override'
+  }
+}
+
+resource pgbouncerPoolMode 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'pgbouncer.pool_mode'
+  properties: {
+    value: 'session'
+    source: 'user-override'
+  }
+  dependsOn: [pgbouncerEnabled]
+}
+
+resource pgbouncerDefaultPoolSize 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'pgbouncer.default_pool_size'
+  properties: {
+    value: '50'
+    source: 'user-override'
+  }
+  dependsOn: [pgbouncerEnabled]
+}
+
 // ── Container Registry ─────────────────────────────────────────────────────────
 // Persistent ACR: images pushed on every CI run; never torn down between runs.
 // Basic SKU; adminUserEnabled lets CI authenticate for image push/pull.

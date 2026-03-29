@@ -171,8 +171,11 @@ jobs:
 
           if [ -n "$PG_PRIVATE_IP" ]; then
             echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
+            # Replace hostname with IP, force sslmode=require, and use port 6432
+            # (PgBouncer port — mirrors Railway's PgBouncer setup).
             AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
               sed "s|@[^/:?@]*|@${PG_PRIVATE_IP}|" | \
+              sed 's/:[0-9]*\/gatheryourdeals/:6432\/gatheryourdeals/' | \
               sed 's/sslmode=[^&? ]*/sslmode=require/')
             if ! echo "$AZ_DATABASE_URL" | grep -q 'sslmode='; then
               if echo "$AZ_DATABASE_URL" | grep -q '?'; then
@@ -184,7 +187,8 @@ jobs:
           else
             echo "WARNING: Could not resolve PostgreSQL private IP — falling back to private hostname"
             AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
-              sed 's/\.postgres\.database\.azure\.com/.private.postgres.database.azure.com/')
+              sed 's/\.postgres\.database\.azure\.com/.private.postgres.database.azure.com/' | \
+              sed 's/:[0-9]*\/gatheryourdeals/:6432\/gatheryourdeals/')
           fi
           echo "AZ_DATABASE_URL=$AZ_DATABASE_URL" >> $GITHUB_ENV
 
