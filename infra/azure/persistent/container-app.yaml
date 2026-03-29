@@ -1,0 +1,89 @@
+# Container App spec for gyd-lt (multi-container: Go service + PgBouncer sidecar).
+# Used by CI: placeholders are replaced by sed before az containerapp create/update --yaml.
+#
+# Required placeholders:
+#   __ENV_ID__        — CA Environment resource ID (from az containerapp env show)
+#   __IMAGE__         — Full ACR image ref with sha tag
+#   __ACR_PASSWORD__  — ACR admin password
+#   __PG_DSN__        — PostgreSQL DSN for PgBouncer → PG (real IP:5432, sslmode=require)
+#   __APP_DSN__       — App DSN for Go → PgBouncer (localhost:6432, sslmode=disable)
+#   __ADMIN_USERNAME__ — GYD admin username (plain env var)
+#   __ADMIN_PASSWORD__ — GYD admin password (secret)
+#   __JWT_SECRET__    — JWT signing secret
+#
+# Optional (lines containing __OTEL_HEADERS__ are removed by sed when secret is unset):
+#   __OTEL_HEADERS__  — OTEL ingest key header (x-honeycomb-team=...)
+
+name: gyd-lt
+location: westus3
+properties:
+  environmentId: __ENV_ID__
+  configuration:
+    registries:
+      - server: gydltpersistent.azurecr.io
+        username: gydltpersistent
+        passwordSecretRef: acr-password
+    secrets:
+      - name: acr-password
+        value: __ACR_PASSWORD__
+      - name: pg-dsn
+        value: __PG_DSN__
+      - name: app-database-url
+        value: __APP_DSN__
+      - name: gyd-admin-password
+        value: __ADMIN_PASSWORD__
+      - name: gyd-jwt-secret
+        value: __JWT_SECRET__
+      - name: otel-headers  # __OTEL_HEADERS__
+        value: __OTEL_HEADERS__
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: http
+  template:
+    containers:
+      - name: gatheryourdeals
+        image: __IMAGE__
+        resources:
+          cpu: 3.75
+          memory: 7.5Gi
+        env:
+          - name: GYD_DATABASE_DRIVER
+            value: postgres
+          - name: DATABASE_URL
+            secretRef: app-database-url
+          - name: GYD_ADMIN_USERNAME
+            value: __ADMIN_USERNAME__
+          - name: GYD_ADMIN_PASSWORD
+            secretRef: gyd-admin-password
+          - name: GYD_JWT_SECRET
+            secretRef: gyd-jwt-secret
+          - name: OTEL_SERVICE_NAME
+            value: gatheryourdeals
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.environment=load-test,platform.name=azure,db.type=postgres"
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: https://api.honeycomb.io
+          - name: OTEL_EXPORTER_OTLP_HEADERS  # __OTEL_HEADERS__
+            secretRef: otel-headers
+      - name: pgbouncer
+        image: edoburu/pgbouncer:1.23.1
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: pg-dsn
+          - name: POOL_MODE
+            value: session
+          - name: DEFAULT_POOL_SIZE
+            value: "50"
+          - name: MAX_CLIENT_CONN
+            value: "200"
+          - name: LISTEN_PORT
+            value: "6432"
+          - name: SERVER_TLS_SSLMODE
+            value: require
+    scale:
+      minReplicas: 0
+      maxReplicas: 1

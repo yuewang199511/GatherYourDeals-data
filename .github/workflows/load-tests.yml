@@ -255,96 +255,29 @@ jobs:
             --resource-group gyd-persistent \
             --query id -o tsv)
 
-          # Optionally inject OTEL headers secret + env var into the YAML
-          OTEL_SECRET_BLOCK=""
-          OTEL_ENV_BLOCK=""
+          # Stamp the committed template into a working copy and substitute placeholders.
+          # The template lives in infra/azure/persistent/container-app.yaml; no heredoc
+          # is used here because heredoc content at column 0 breaks the workflow YAML parser.
+          cp infra/azure/persistent/container-app.yaml /tmp/gyd-lt.yaml
+
+          # Use | as sed delimiter — values may contain slashes (DSN, image refs).
+          sed -i "s|__ENV_ID__|${ENV_ID}|g"                         /tmp/gyd-lt.yaml
+          sed -i "s|__IMAGE__|gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}|g" /tmp/gyd-lt.yaml
+          sed -i "s|__ACR_PASSWORD__|${ACR_ADMIN_PASSWORD}|g"       /tmp/gyd-lt.yaml
+          sed -i "s|__PG_DSN__|${PG_DIRECT_DSN}|g"                  /tmp/gyd-lt.yaml
+          sed -i "s|__APP_DSN__|${APP_DSN}|g"                       /tmp/gyd-lt.yaml
+          sed -i "s|__ADMIN_USERNAME__|${GYD_ADMIN_USERNAME_VAL}|g" /tmp/gyd-lt.yaml
+          sed -i "s|__ADMIN_PASSWORD__|${GYD_ADMIN_PASSWORD_SECRET}|g" /tmp/gyd-lt.yaml
+          sed -i "s|__JWT_SECRET__|${GYD_JWT_SECRET_SECRET}|g"      /tmp/gyd-lt.yaml
+
+          # OTEL headers: substitute if set, remove those lines if unset.
           if [ -n "$OTEL_HEADERS_SECRET" ]; then
-            OTEL_SECRET_BLOCK="      - name: otel-headers
-        value: \"${OTEL_HEADERS_SECRET}\""
-            OTEL_ENV_BLOCK="          - name: OTEL_EXPORTER_OTLP_HEADERS
-            secretRef: otel-headers"
+            sed -i "s|__OTEL_HEADERS__|${OTEL_HEADERS_SECRET}|g" /tmp/gyd-lt.yaml
+          else
+            sed -i '/__OTEL_HEADERS__/d' /tmp/gyd-lt.yaml
           fi
 
-          # Generate multi-container spec:
-          #   - gatheryourdeals: Go service (port 8080 exposed externally)
-          #   - pgbouncer: PgBouncer sidecar (session mode, localhost:6432)
-          #     Go service connects to localhost:6432; PgBouncer connects to PostgreSQL at
-          #     the real IP on port 5432 with TLS. This mirrors Railway's PgBouncer setup.
-          cat > /tmp/gyd-lt.yaml << YAML
-name: gyd-lt
-location: westus3
-properties:
-  environmentId: ${ENV_ID}
-  configuration:
-    registries:
-      - server: gydltpersistent.azurecr.io
-        username: gydltpersistent
-        passwordSecretRef: acr-password
-    secrets:
-      - name: acr-password
-        value: "${ACR_ADMIN_PASSWORD}"
-      - name: pg-dsn
-        value: "${PG_DIRECT_DSN}"
-      - name: app-database-url
-        value: "${APP_DSN}"
-      - name: gyd-admin-password
-        value: "${GYD_ADMIN_PASSWORD_SECRET}"
-      - name: gyd-jwt-secret
-        value: "${GYD_JWT_SECRET_SECRET}"
-${OTEL_SECRET_BLOCK}
-    ingress:
-      external: true
-      targetPort: 8080
-      transport: http
-  template:
-    containers:
-      - name: gatheryourdeals
-        image: gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}
-        resources:
-          cpu: 3.75
-          memory: 7.5Gi
-        env:
-          - name: GYD_DATABASE_DRIVER
-            value: postgres
-          - name: DATABASE_URL
-            secretRef: app-database-url
-          - name: GYD_ADMIN_USERNAME
-            value: "${GYD_ADMIN_USERNAME_VAL}"
-          - name: GYD_ADMIN_PASSWORD
-            secretRef: gyd-admin-password
-          - name: GYD_JWT_SECRET
-            secretRef: gyd-jwt-secret
-          - name: OTEL_SERVICE_NAME
-            value: gatheryourdeals
-          - name: OTEL_RESOURCE_ATTRIBUTES
-            value: "service.environment=load-test,platform.name=azure,db.type=postgres"
-          - name: OTEL_EXPORTER_OTLP_ENDPOINT
-            value: https://api.honeycomb.io
-${OTEL_ENV_BLOCK}
-      - name: pgbouncer
-        image: edoburu/pgbouncer:1.23.1
-        resources:
-          cpu: 0.25
-          memory: 0.5Gi
-        env:
-          - name: DATABASE_URL
-            secretRef: pg-dsn
-          - name: POOL_MODE
-            value: session
-          - name: DEFAULT_POOL_SIZE
-            value: "50"
-          - name: MAX_CLIENT_CONN
-            value: "200"
-          - name: LISTEN_PORT
-            value: "6432"
-          - name: SERVER_TLS_SSLMODE
-            value: require
-    scale:
-      minReplicas: 0
-      maxReplicas: 1
-YAML
-
-          # Create or update (YAML replaces full spec including secrets and containers)
+          # Create or update (--yaml replaces full spec including secrets and containers)
           if az containerapp show --name gyd-lt --resource-group gyd-persistent &>/dev/null 2>&1; then
             echo "Container App exists — updating with new image and sidecar config"
             az containerapp update \
