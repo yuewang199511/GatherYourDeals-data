@@ -134,6 +134,56 @@ resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
   }
 }
 
+// ── pgBouncer Container App ────────────────────────────────────────────────────
+// Persistent connection pooler between gyd-lt and PostgreSQL.
+// Runs in the same CA environment and VNet — can resolve the PostgreSQL private
+// DNS zone directly (unlike the CI runner which is outside the VNet).
+// Internal TCP ingress on 6432; gyd-lt connects via gyd-pgbouncer.<defaultDomain>.
+resource pgbouncer 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'gyd-pgbouncer'
+  location: location
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      ingress: {
+        external: false
+        targetPort: 6432
+        transport: 'tcp'
+      }
+      secrets: [
+        {
+          name: 'pg-dsn'
+          value: 'postgres://gydadmin:${pgAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/gatheryourdeals?sslmode=require'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'pgbouncer'
+          image: 'edoburu/pgbouncer:1.23.1'
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'DATABASE_URL', secretRef: 'pg-dsn' }
+            { name: 'POOL_MODE', value: 'session' }
+            { name: 'DEFAULT_POOL_SIZE', value: '50' }
+            { name: 'MAX_CLIENT_CONN', value: '200' }
+            { name: 'LISTEN_PORT', value: '6432' }
+            { name: 'SERVER_TLS_SSLMODE', value: 'require' }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
 // ── Outputs ───────────────────────────────────────────────────────────────────
 
 output subnetAppsId string = subnetApps.id
@@ -142,3 +192,4 @@ output postgresqlFqdn string = postgres.properties.fullyQualifiedDomainName
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
 output caEnvName string = caEnv.name
+output caEnvDefaultDomain string = caEnv.properties.defaultDomain
