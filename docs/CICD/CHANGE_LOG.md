@@ -19,3 +19,4 @@ Design decisions and significant infrastructure changes. Routine report addition
 | 2026-03-28 | — | Added Container Apps VNet integration | Container Apps must reach private PostgreSQL via gyd-vnet; subnet-apps delegated to Microsoft.App/environments |
 | 2026-03-28 | — | Replaced direct psql DB reset with Container App Job | CI runner cannot reach VNet-private PostgreSQL; job runs inside VNet instead |
 | 2026-03-28 | — | Updated Container App CPU/memory to 4.0 vCPU / 8.0 Gi | Approximate Railway's 8 vCPU / 8 GB resource limit (Consumption plan max is 4 vCPU) |
+| 2026-03-29 | — | Replaced az acr build with docker build + docker push | ACR Tasks blocked by subscription policy (TasksOperationsNotAllowed); local runner build avoids it |

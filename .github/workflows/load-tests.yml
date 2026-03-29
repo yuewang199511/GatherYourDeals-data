@@ -163,12 +163,16 @@ jobs:
       - name: Build and push image to ACR
         if: inputs.provider == 'azure'
         run: |
-          # az acr build runs the Docker build inside Azure — no local Docker daemon needed
-          az acr build \
-            --registry "$ACR_NAME" \
-            --image "gatheryourdeals:${{ github.sha }}" \
-            --file Dockerfile \
-            .
+          # ACR Tasks (az acr build) is blocked by subscription policy.
+          # Use local docker build on the runner + docker push instead.
+          ACR_ADMIN_PASSWORD=$(az acr credential show \
+            --name "$ACR_NAME" \
+            --query "passwords[0].value" -o tsv)
+          docker login "$ACR_LOGIN_SERVER" \
+            --username "$ACR_NAME" \
+            --password "$ACR_ADMIN_PASSWORD"
+          docker build -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" -f Dockerfile .
+          docker push "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}"
 
       - name: Deploy app to Azure Container Apps
         if: inputs.provider == 'azure'
