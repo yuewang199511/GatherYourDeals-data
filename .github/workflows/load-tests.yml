@@ -375,72 +375,18 @@ jobs:
           fi
           cd load_testing && python3 seed.py
 
-      - name: Reset and seed load-test database (Azure)
+      - name: Seed load-test database (Azure)
         if: inputs.provider == 'azure'
         env:
           GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
         run: |
-          # PostgreSQL is VNet-private — CI cannot connect directly via psql.
-          # Instead, deploy a Container App Job running postgres:16 inside the VNet.
-          # It connects via the private hostname and runs the TRUNCATE SQL, then exits.
-          # The job lives in the ephemeral RG and is destroyed with it at teardown.
-
-          # Encode SQL to avoid quoting issues when passing through Container App args.
-          RESET_SQL_B64=$(echo "TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';" | base64 -w0)
-
-          az containerapp job create \
-            --name "gyd-reset-${{ github.run_id }}" \
-            --resource-group "$AZ_RESOURCE_GROUP" \
-            --environment "$AZ_CA_ENV" \
-            --trigger-type Manual \
-            --replica-timeout 120 \
-            --replica-retry-limit 0 \
-            --image postgres:16 \
-            --cpu 0.25 --memory 0.5Gi \
-            --secrets "pgdsn=$AZ_DATABASE_URL" \
-            --env-vars \
-              "PG_DSN=secretref:pgdsn" \
-              "RESET_SQL_B64=$RESET_SQL_B64" \
-            --command '["/bin/sh","-c","echo $RESET_SQL_B64 | base64 -d | psql $PG_DSN"]'
-
-          EXEC_NAME=$(az containerapp job start \
-            --name "gyd-reset-${{ github.run_id }}" \
-            --resource-group "$AZ_RESOURCE_GROUP" \
-            --query "name" -o tsv)
-          echo "Started reset job execution: $EXEC_NAME"
-
-          # Poll for completion (24 × 5 s = 120 s max)
-          for i in $(seq 1 24); do
-            STATUS=$(az containerapp job execution show \
-              --name "gyd-reset-${{ github.run_id }}" \
-              --resource-group "$AZ_RESOURCE_GROUP" \
-              --job-execution-name "$EXEC_NAME" \
-              --query "properties.status" -o tsv 2>/dev/null || echo "Unknown")
-            echo "Reset job status: $STATUS"
-            [ "$STATUS" = "Succeeded" ] && break
-            if [ "$STATUS" = "Failed" ]; then
-              echo "ERROR: DB reset job failed — fetching container logs"
-              az containerapp job logs show \
-                --name "gyd-reset-${{ github.run_id }}" \
-                --resource-group "$AZ_RESOURCE_GROUP" \
-                --tail 100 2>/dev/null || true
-              az containerapp job execution show \
-                --name "gyd-reset-${{ github.run_id }}" \
-                --resource-group "$AZ_RESOURCE_GROUP" \
-                --job-execution-name "$EXEC_NAME" \
-                -o json 2>/dev/null || true
-              exit 1
-            fi
-            sleep 5
-          done
-
-          if [ "$STATUS" != "Succeeded" ]; then
-            echo "ERROR: DB reset job timed out after 120 s"
-            exit 1
-          fi
-
+          # PostgreSQL is VNet-private — CI cannot connect directly for a TRUNCATE.
+          # seed.py is idempotent: 409 on duplicate user is handled gracefully.
+          # On a fresh persistent DB the tables are empty; on repeat runs old
+          # receipts accumulate but do not affect test correctness (guardrail
+          # checks ≥1000 receipts, not exactly 1000).
           cd load_testing && python3 seed.py
 
       - name: Run load tests
