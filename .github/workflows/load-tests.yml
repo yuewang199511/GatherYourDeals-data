@@ -387,6 +387,7 @@ jobs:
             --environment "$AZ_CA_ENV" \
             --trigger-type Manual \
             --replica-timeout 120 \
+            --replica-retry-limit 0 \
             --image postgres:16 \
             --cpu 0.25 --memory 0.5Gi \
             --secrets "pgdsn=$AZ_DATABASE_URL" \
