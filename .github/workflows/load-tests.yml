@@ -393,8 +393,7 @@ jobs:
             --env-vars \
               "PG_DSN=secretref:pgdsn" \
               "RESET_SQL_B64=$RESET_SQL_B64" \
-            --command "/bin/sh" \
-            --args "-c" 'echo $RESET_SQL_B64 | base64 -d | psql "$PG_DSN"'
+            --command '["/bin/sh","-c","echo $RESET_SQL_B64 | base64 -d | psql $PG_DSN"]'
 
           EXEC_NAME=$(az containerapp job start \
             --name "gyd-reset-${{ github.run_id }}" \
