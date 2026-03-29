@@ -176,10 +176,33 @@ jobs:
 
       - name: Deploy app to Azure Container Apps
         if: inputs.provider == 'azure'
+        env:
+          OTEL_HEADERS_SECRET: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
         run: |
           ACR_ADMIN_PASSWORD=$(az acr credential show \
             --name "$ACR_NAME" \
             --query "passwords[0].value" -o tsv)
+
+          # Build secrets and env-vars arrays conditionally.
+          # Container Apps rejects empty-value secrets, so only add otel-headers
+          # when the GitHub secret is non-empty.
+          SECRETS_ARGS=(
+            "database-url=$AZ_DATABASE_URL"
+            "gyd-admin-password=${{ secrets.GYD_ADMIN_PASSWORD }}"
+            "gyd-jwt-secret=${{ secrets.GYD_JWT_SECRET }}"
+          )
+          ENV_ARGS=(
+            GYD_DATABASE_DRIVER=postgres
+            "GYD_ADMIN_USERNAME=${{ secrets.GYD_ADMIN_USERNAME }}"
+            OTEL_SERVICE_NAME=gatheryourdeals
+            DATABASE_URL=secretref:database-url
+            GYD_ADMIN_PASSWORD=secretref:gyd-admin-password
+            GYD_JWT_SECRET=secretref:gyd-jwt-secret
+          )
+          if [ -n "$OTEL_HEADERS_SECRET" ]; then
+            SECRETS_ARGS+=("otel-headers=$OTEL_HEADERS_SECRET")
+            ENV_ARGS+=(OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers)
+          fi
 
           # Container Apps (Consumption plan) = scale to zero when idle,
           # billed per vCPU-second used — same model as Railway.
@@ -200,19 +223,8 @@ jobs:
             --min-replicas 0 \
             --max-replicas 10 \
             --cpu 4.0 --memory 8.0Gi \
-            --secrets \
-              "database-url=$AZ_DATABASE_URL" \
-              "gyd-admin-password=${{ secrets.GYD_ADMIN_PASSWORD }}" \
-              "gyd-jwt-secret=${{ secrets.GYD_JWT_SECRET }}" \
-              "otel-headers=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" \
-            --env-vars \
-              GYD_DATABASE_DRIVER=postgres \
-              "GYD_ADMIN_USERNAME=${{ secrets.GYD_ADMIN_USERNAME }}" \
-              OTEL_SERVICE_NAME=gatheryourdeals \
-              DATABASE_URL=secretref:database-url \
-              GYD_ADMIN_PASSWORD=secretref:gyd-admin-password \
-              GYD_JWT_SECRET=secretref:gyd-jwt-secret \
-              OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers
+            --secrets "${SECRETS_ARGS[@]}" \
+            --env-vars "${ENV_ARGS[@]}"
 
           # Container Apps issues a stable HTTPS FQDN automatically
           APP_FQDN=$(az containerapp show \
