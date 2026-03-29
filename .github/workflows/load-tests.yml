@@ -192,6 +192,28 @@ jobs:
           echo "PG_DIRECT_DSN=$PG_DIRECT_DSN" >> $GITHUB_ENV
           echo "APP_DSN=$APP_DSN" >> $GITHUB_ENV
 
+      - name: Ensure Container Apps Environment exists (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          if az containerapp env show \
+              --name gyd-lt-env \
+              --resource-group gyd-persistent &>/dev/null 2>&1; then
+            echo "gyd-lt-env already exists — skipping creation"
+          else
+            echo "Creating gyd-lt-env (one-time, ~5-10 min)..."
+            SUBNET_ID=$(az network vnet subnet show \
+              --vnet-name gyd-vnet \
+              --resource-group gyd-persistent \
+              --name subnet-apps \
+              --query id -o tsv)
+            az containerapp env create \
+              --name gyd-lt-env \
+              --resource-group gyd-persistent \
+              --location westus3 \
+              --infrastructure-subnet-resource-id "$SUBNET_ID"
+            echo "gyd-lt-env created"
+          fi
+
       - name: Set up Docker Buildx
         if: inputs.provider == 'azure'
         uses: docker/setup-buildx-action@v3
