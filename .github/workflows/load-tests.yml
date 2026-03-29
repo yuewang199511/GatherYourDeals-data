@@ -154,6 +154,8 @@ jobs:
 
       - name: Set persistent resource names and resolve PG DSN (Azure)
         if: inputs.provider == 'azure'
+        env:
+          AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
         run: |
           # All Azure load-test resources are persistent — no provisioning needed per run.
           echo "ACR_LOGIN_SERVER=gydltpersistent.azurecr.io" >> $GITHUB_ENV
@@ -171,26 +173,24 @@ jobs:
 
           if [ -n "$PG_PRIVATE_IP" ]; then
             echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
-            # Replace hostname with IP, force sslmode=require, and use port 6432
-            # (PgBouncer port — mirrors Railway's PgBouncer setup).
-            AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
-              sed "s|@[^/:?@]*|@${PG_PRIVATE_IP}|" | \
-              sed 's/:[0-9]*\/gatheryourdeals/:6432\/gatheryourdeals/' | \
-              sed 's/sslmode=[^&? ]*/sslmode=require/')
-            if ! echo "$AZ_DATABASE_URL" | grep -q 'sslmode='; then
-              if echo "$AZ_DATABASE_URL" | grep -q '?'; then
-                AZ_DATABASE_URL="${AZ_DATABASE_URL}&sslmode=require"
-              else
-                AZ_DATABASE_URL="${AZ_DATABASE_URL}?sslmode=require"
-              fi
-            fi
+            HOST_PART="@${PG_PRIVATE_IP}"
           else
-            echo "WARNING: Could not resolve PostgreSQL private IP — falling back to private hostname"
-            AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
-              sed 's/\.postgres\.database\.azure\.com/.private.postgres.database.azure.com/' | \
-              sed 's/:[0-9]*\/gatheryourdeals/:6432\/gatheryourdeals/')
+            echo "WARNING: Could not resolve PostgreSQL private IP — using private hostname"
+            HOST_PART="@gyd-pg-main.private.postgres.database.azure.com"
           fi
-          echo "AZ_DATABASE_URL=$AZ_DATABASE_URL" >> $GITHUB_ENV
+
+          # Extract credentials from the secret DSN using Python URL parser (handles special chars)
+          PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
+          PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
+
+          # PG_DIRECT_DSN: PgBouncer sidecar → PostgreSQL (real IP, port 5432, TLS required)
+          PG_DIRECT_DSN="postgres://${PG_USER}:${PG_PASS}${HOST_PART}:5432/gatheryourdeals?sslmode=require"
+
+          # APP_DSN: Go service → PgBouncer sidecar on localhost (no TLS on loopback)
+          APP_DSN="postgres://${PG_USER}:${PG_PASS}@localhost:6432/gatheryourdeals?sslmode=disable"
+
+          echo "PG_DIRECT_DSN=$PG_DIRECT_DSN" >> $GITHUB_ENV
+          echo "APP_DSN=$APP_DSN" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         if: inputs.provider == 'azure'
@@ -219,71 +219,121 @@ jobs:
         if: inputs.provider == 'azure'
         env:
           OTEL_HEADERS_SECRET: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+          GYD_ADMIN_PASSWORD_SECRET: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_JWT_SECRET_SECRET: ${{ secrets.GYD_JWT_SECRET }}
+          GYD_ADMIN_USERNAME_VAL: ${{ secrets.GYD_ADMIN_USERNAME }}
         run: |
           ACR_ADMIN_PASSWORD=$(az acr credential show \
             --name gydltpersistent \
             --query "passwords[0].value" -o tsv)
 
-          # Build secrets and env-vars arrays.
-          # Container Apps rejects empty-value secrets, so only add otel-headers
-          # when the GitHub secret is non-empty.
-          # acr-password stored as a named secret so registry set can reference it.
-          SECRETS_ARGS=(
-            "database-url=$AZ_DATABASE_URL"
-            "gyd-admin-password=${{ secrets.GYD_ADMIN_PASSWORD }}"
-            "gyd-jwt-secret=${{ secrets.GYD_JWT_SECRET }}"
-            "acr-password=$ACR_ADMIN_PASSWORD"
-          )
-          ENV_ARGS=(
-            GYD_DATABASE_DRIVER=postgres
-            "GYD_ADMIN_USERNAME=${{ secrets.GYD_ADMIN_USERNAME }}"
-            OTEL_SERVICE_NAME=gatheryourdeals
-            "OTEL_RESOURCE_ATTRIBUTES=service.environment=load-test,platform.name=azure,db.type=postgres"
-            OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
-            DATABASE_URL=secretref:database-url
-            GYD_ADMIN_PASSWORD=secretref:gyd-admin-password
-            GYD_JWT_SECRET=secretref:gyd-jwt-secret
-          )
+          # Fetch CA Environment resource ID (required for YAML create)
+          ENV_ID=$(az containerapp env show \
+            --name gyd-lt-env \
+            --resource-group gyd-persistent \
+            --query id -o tsv)
+
+          # Optionally inject OTEL headers secret + env var into the YAML
+          OTEL_SECRET_BLOCK=""
+          OTEL_ENV_BLOCK=""
           if [ -n "$OTEL_HEADERS_SECRET" ]; then
-            SECRETS_ARGS+=("otel-headers=$OTEL_HEADERS_SECRET")
-            ENV_ARGS+=(OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers)
+            OTEL_SECRET_BLOCK="      - name: otel-headers
+        value: \"${OTEL_HEADERS_SECRET}\""
+            OTEL_ENV_BLOCK="          - name: OTEL_EXPORTER_OTLP_HEADERS
+            secretRef: otel-headers"
           fi
 
-          # Persistent Container App: update image + secrets on each run.
-          # Create on first run only (environment gyd-lt-env is also persistent).
-          # Scales to 0 when idle — no cost between runs.
+          # Generate multi-container spec:
+          #   - gatheryourdeals: Go service (port 8080 exposed externally)
+          #   - pgbouncer: PgBouncer sidecar (session mode, localhost:6432)
+          #     Go service connects to localhost:6432; PgBouncer connects to PostgreSQL at
+          #     the real IP on port 5432 with TLS. This mirrors Railway's PgBouncer setup.
+          cat > /tmp/gyd-lt.yaml << YAML
+name: gyd-lt
+location: westus3
+properties:
+  environmentId: ${ENV_ID}
+  configuration:
+    registries:
+      - server: gydltpersistent.azurecr.io
+        username: gydltpersistent
+        passwordSecretRef: acr-password
+    secrets:
+      - name: acr-password
+        value: "${ACR_ADMIN_PASSWORD}"
+      - name: pg-dsn
+        value: "${PG_DIRECT_DSN}"
+      - name: app-database-url
+        value: "${APP_DSN}"
+      - name: gyd-admin-password
+        value: "${GYD_ADMIN_PASSWORD_SECRET}"
+      - name: gyd-jwt-secret
+        value: "${GYD_JWT_SECRET_SECRET}"
+${OTEL_SECRET_BLOCK}
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: http
+  template:
+    containers:
+      - name: gatheryourdeals
+        image: gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}
+        resources:
+          cpu: 3.75
+          memory: 7.5Gi
+        env:
+          - name: GYD_DATABASE_DRIVER
+            value: postgres
+          - name: DATABASE_URL
+            secretRef: app-database-url
+          - name: GYD_ADMIN_USERNAME
+            value: "${GYD_ADMIN_USERNAME_VAL}"
+          - name: GYD_ADMIN_PASSWORD
+            secretRef: gyd-admin-password
+          - name: GYD_JWT_SECRET
+            secretRef: gyd-jwt-secret
+          - name: OTEL_SERVICE_NAME
+            value: gatheryourdeals
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.environment=load-test,platform.name=azure,db.type=postgres"
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: https://api.honeycomb.io
+${OTEL_ENV_BLOCK}
+      - name: pgbouncer
+        image: edoburu/pgbouncer:1.23.1
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: pg-dsn
+          - name: POOL_MODE
+            value: session
+          - name: DEFAULT_POOL_SIZE
+            value: "50"
+          - name: MAX_CLIENT_CONN
+            value: "200"
+          - name: LISTEN_PORT
+            value: "6432"
+          - name: SERVER_TLS_SSLMODE
+            value: require
+    scale:
+      minReplicas: 0
+      maxReplicas: 1
+YAML
+
+          # Create or update (YAML replaces full spec including secrets and containers)
           if az containerapp show --name gyd-lt --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "Container App exists — updating secrets and image"
-            az containerapp secret set \
-              --name gyd-lt --resource-group gyd-persistent \
-              --secrets "${SECRETS_ARGS[@]}"
-            az containerapp registry set \
-              --name gyd-lt --resource-group gyd-persistent \
-              --server gydltpersistent.azurecr.io \
-              --username gydltpersistent \
-              --password-secret-ref acr-password
+            echo "Container App exists — updating with new image and sidecar config"
             az containerapp update \
-              --name gyd-lt --resource-group gyd-persistent \
-              --image "gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}" \
-              --min-replicas 0 \
-              --max-replicas 1
-          else
-            echo "Container App not found — creating"
-            az containerapp create \
               --name gyd-lt \
               --resource-group gyd-persistent \
-              --environment gyd-lt-env \
-              --image "gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}" \
-              --registry-server gydltpersistent.azurecr.io \
-              --registry-username gydltpersistent \
-              --registry-password "$ACR_ADMIN_PASSWORD" \
-              --target-port 8080 \
-              --ingress external \
-              --min-replicas 0 \
-              --max-replicas 1 \
-              --cpu 4.0 --memory 8.0Gi \
-              --secrets "${SECRETS_ARGS[@]}" \
-              --env-vars "${ENV_ARGS[@]}"
+              --yaml /tmp/gyd-lt.yaml
+          else
+            echo "Container App not found — creating with PgBouncer sidecar"
+            az containerapp create \
+              --resource-group gyd-persistent \
+              --yaml /tmp/gyd-lt.yaml
           fi
 
           APP_FQDN=$(az containerapp show \
