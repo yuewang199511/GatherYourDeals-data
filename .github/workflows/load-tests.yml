@@ -231,19 +231,28 @@ jobs:
           fi
           echo "AZ_DATABASE_URL=$AZ_DATABASE_URL" >> $GITHUB_ENV
 
+      - name: Set up Docker Buildx
+        if: inputs.provider == 'azure'
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push image to ACR
         if: inputs.provider == 'azure'
         run: |
           # ACR Tasks (az acr build) is blocked by subscription policy.
-          # Use local docker build on the runner + docker push instead.
+          # Use local docker buildx build on the runner + docker push instead.
+          # GHA layer cache (type=gha) cuts repeat builds from ~10 min to ~1-2 min.
           ACR_ADMIN_PASSWORD=$(az acr credential show \
             --name "$ACR_NAME" \
             --query "passwords[0].value" -o tsv)
           docker login "$ACR_LOGIN_SERVER" \
             --username "$ACR_NAME" \
             --password "$ACR_ADMIN_PASSWORD"
-          docker build -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" -f Dockerfile .
-          docker push "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}"
+          docker buildx build \
+            --push \
+            --cache-from type=gha \
+            --cache-to   type=gha,mode=max \
+            -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
+            -f Dockerfile .
 
       - name: Deploy app to Azure Container Apps
         if: inputs.provider == 'azure'
@@ -412,7 +421,16 @@ jobs:
             echo "Reset job status: $STATUS"
             [ "$STATUS" = "Succeeded" ] && break
             if [ "$STATUS" = "Failed" ]; then
-              echo "ERROR: DB reset job failed"
+              echo "ERROR: DB reset job failed — fetching container logs"
+              az containerapp job logs show \
+                --name "gyd-reset-${{ github.run_id }}" \
+                --resource-group "$AZ_RESOURCE_GROUP" \
+                --tail 100 2>/dev/null || true
+              az containerapp job execution show \
+                --name "gyd-reset-${{ github.run_id }}" \
+                --resource-group "$AZ_RESOURCE_GROUP" \
+                --job-execution-name "$EXEC_NAME" \
+                -o json 2>/dev/null || true
               exit 1
             fi
             sleep 5
