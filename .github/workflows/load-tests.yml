@@ -130,6 +130,28 @@ jobs:
           az provider register --namespace Microsoft.App --wait
           az provider register --namespace Microsoft.OperationalInsights --wait
 
+      - name: Diagnose persistent network config
+        if: inputs.provider == 'azure'
+        run: |
+          echo "=== VNet DNS servers ==="
+          az network vnet show \
+            --name gyd-vnet --resource-group gyd-persistent \
+            --query "dhcpOptions.dnsServers" -o tsv 2>/dev/null || echo "(none — using Azure default)"
+          echo "=== Private DNS zone ==="
+          az network private-dns zone show \
+            --name "gyd-pg-main.private.postgres.database.azure.com" \
+            --resource-group gyd-persistent -o table 2>/dev/null || echo "MISSING"
+          echo "=== DNS zone A records ==="
+          az network private-dns record-set a list \
+            --zone-name "gyd-pg-main.private.postgres.database.azure.com" \
+            --resource-group gyd-persistent \
+            --query "[].{name:name,ip:aRecords[0].ipv4Address}" -o table 2>/dev/null || echo "NONE"
+          echo "=== VNet links for the DNS zone ==="
+          az network private-dns link vnet list \
+            --zone-name "gyd-pg-main.private.postgres.database.azure.com" \
+            --resource-group gyd-persistent \
+            --query "[].{name:name,vnet:virtualNetwork.id,state:registrationEnabled}" -o table 2>/dev/null || echo "NONE"
+
       - name: Clean up stale Container App Environments on subnet-apps
         if: inputs.provider == 'azure'
         run: |
@@ -174,10 +196,37 @@ jobs:
           echo "AZ_RESOURCE_GROUP=$RESOURCE_GROUP" >> $GITHUB_ENV
           echo "AZ_CA_ENV=$CA_ENV" >> $GITHUB_ENV
 
-          # Derive private DSN from the persistent secret — replace public hostname
-          # with private hostname that resolves inside the VNet.
-          AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
-            sed 's/\.postgres\.database\.azure\.com/.private.postgres.database.azure.com/')
+          # Resolve PostgreSQL private IP from the DNS zone A record.
+          # Containers in the VNet fail to resolve the private DNS hostname
+          # (Docker DNS at 127.0.0.11 does not forward to Azure DNS for private zones).
+          # Using the IP directly in the DSN bypasses DNS entirely.
+          PG_ZONE="gyd-pg-main.private.postgres.database.azure.com"
+          PG_PRIVATE_IP=$(az network private-dns record-set a list \
+            --zone-name "$PG_ZONE" \
+            --resource-group "gyd-persistent" \
+            --query "[0].aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
+
+          if [ -n "$PG_PRIVATE_IP" ]; then
+            echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
+            # Replace hostname in DSN with private IP and force sslmode=require
+            # (sslmode=verify-full would fail with an IP address instead of hostname)
+            AZ_DATABASE_URL=$(python3 -c "
+import sys, re, urllib.parse
+dsn = sys.argv[1]
+ip  = sys.argv[2]
+# Replace host in the DSN and override sslmode to require (IP has no matching cert CN)
+dsn = re.sub(r'@[^/:@]+', '@' + ip, dsn)
+dsn = re.sub(r'sslmode=[^&?]*', 'sslmode=require', dsn)
+if 'sslmode=' not in dsn:
+    sep = '&' if '?' in dsn else '?'
+    dsn += sep + 'sslmode=require'
+print(dsn)
+" "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" "$PG_PRIVATE_IP")
+          else
+            echo "WARNING: Could not resolve PostgreSQL private IP — falling back to private hostname"
+            AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
+              sed 's/\.postgres\.database\.azure\.com/.private.postgres.database.azure.com/')
+          fi
           echo "AZ_DATABASE_URL=$AZ_DATABASE_URL" >> $GITHUB_ENV
 
       - name: Build and push image to ACR
