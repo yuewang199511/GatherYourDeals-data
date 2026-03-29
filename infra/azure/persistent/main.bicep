@@ -22,3 +22,6 @@ module resources 'resources.bicep' = {
 output subnetAppsId string = resources.outputs.subnetAppsId
 output subnetPgId string = resources.outputs.subnetPgId
 output postgresqlFqdn string = resources.outputs.postgresqlFqdn
+output acrLoginServer string = resources.outputs.acrLoginServer
+output acrName string = resources.outputs.acrName
+output caEnvName string = resources.outputs.caEnvName

@@ -152,57 +152,17 @@ jobs:
             --resource-group gyd-persistent \
             --query "[].{name:name,vnet:virtualNetwork.id,state:registrationEnabled}" -o table 2>/dev/null || echo "NONE"
 
-      - name: Clean up stale Container App Environments on subnet-apps
+      - name: Set persistent resource names and resolve PG DSN (Azure)
         if: inputs.provider == 'azure'
         run: |
-          # subnet-apps allows only one Container Apps Environment at a time.
-          # Delete any stale environment (from a previous failed run) before provisioning.
-          SUBNET_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/gyd-persistent/providers/Microsoft.Network/virtualNetworks/gyd-vnet/subnets/subnet-apps"
-          STALE_ENVS=$(az containerapp env list \
-            --query "[?properties.vnetConfiguration.infrastructureSubnetId=='$SUBNET_ID'].{rg:resourceGroup,name:name}" \
-            -o tsv 2>/dev/null || true)
-          if [ -n "$STALE_ENVS" ]; then
-            echo "Found stale environments using subnet-apps:"
-            echo "$STALE_ENVS"
-            while IFS=$'\t' read -r RG NAME; do
-              echo "Deleting stale RG: $RG"
-              az group delete --name "$RG" --yes 2>/dev/null || true
-            done <<< "$STALE_ENVS"
-          else
-            echo "No stale environments found — subnet-apps is free."
-          fi
-
-      - name: Provision Azure infra (RG + ACR + Container Apps env)
-        if: inputs.provider == 'azure'
-        run: |
-          RG_NAME="gyd-lt-${{ github.run_id }}"
-          # Persistent VNet is in westus3 — ephemeral RG + Container Apps env must
-          # be in the same region for VNet integration to work.
-          LOCATION="westus3"
-          APPS_SUBNET_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/gyd-persistent/providers/Microsoft.Network/virtualNetworks/gyd-vnet/subnets/subnet-apps"
-
-          az group create --name "$RG_NAME" --location "$LOCATION"
-
-          OUTPUTS=$(az deployment group create \
-            --name "gyd-lt-deploy" \
-            --resource-group "$RG_NAME" \
-            --template-file infra/azure/main.bicep \
-            --parameters runId="${{ github.run_id }}" appsSubnetId="$APPS_SUBNET_ID" location="$LOCATION" \
-            --query properties.outputs \
-            -o json)
-
-          ACR_LOGIN_SERVER=$(echo "$OUTPUTS" | jq -r '.acrLoginServer.value')
-          ACR_NAME=$(echo "$OUTPUTS" | jq -r '.acrName.value')
-
-          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
-          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
-          echo "AZ_RESOURCE_GROUP=$RG_NAME" >> $GITHUB_ENV
-          echo "AZ_CA_ENV=gyd-lt-${{ github.run_id }}" >> $GITHUB_ENV
+          # All Azure load-test resources are persistent — no provisioning needed per run.
+          echo "ACR_LOGIN_SERVER=gydltpersistent.azurecr.io" >> $GITHUB_ENV
+          echo "ACR_NAME=gydltpersistent" >> $GITHUB_ENV
+          echo "AZ_RESOURCE_GROUP=gyd-persistent" >> $GITHUB_ENV
 
           # Resolve PostgreSQL private IP from the DNS zone A record.
-          # Containers in the VNet fail to resolve the private DNS hostname
-          # (Docker DNS at 127.0.0.11 does not forward to Azure DNS for private zones).
-          # Using the IP directly in the DSN bypasses DNS entirely.
+          # Container Apps DNS (127.0.0.11) cannot resolve private DNS zones;
+          # inject the IP directly into the DSN to bypass DNS entirely.
           PG_ZONE="gyd-pg-main.private.postgres.database.azure.com"
           PG_PRIVATE_IP=$(az network private-dns record-set a list \
             --zone-name "$PG_ZONE" \
@@ -211,9 +171,6 @@ jobs:
 
           if [ -n "$PG_PRIVATE_IP" ]; then
             echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
-            # Replace hostname with IP in DSN. Pattern @[^/:?@]* captures the host
-            # between @ and the next port separator, path, or query char.
-            # sslmode=require forced — TLS cert CN won't match an IP address.
             AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
               sed "s|@[^/:?@]*|@${PG_PRIVATE_IP}|" | \
               sed 's/sslmode=[^&? ]*/sslmode=require/')
@@ -260,16 +217,18 @@ jobs:
           OTEL_HEADERS_SECRET: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
         run: |
           ACR_ADMIN_PASSWORD=$(az acr credential show \
-            --name "$ACR_NAME" \
+            --name gydltpersistent \
             --query "passwords[0].value" -o tsv)
 
-          # Build secrets and env-vars arrays conditionally.
+          # Build secrets and env-vars arrays.
           # Container Apps rejects empty-value secrets, so only add otel-headers
           # when the GitHub secret is non-empty.
+          # acr-password stored as a named secret so registry set can reference it.
           SECRETS_ARGS=(
             "database-url=$AZ_DATABASE_URL"
             "gyd-admin-password=${{ secrets.GYD_ADMIN_PASSWORD }}"
             "gyd-jwt-secret=${{ secrets.GYD_JWT_SECRET }}"
+            "acr-password=$ACR_ADMIN_PASSWORD"
           )
           ENV_ARGS=(
             GYD_DATABASE_DRIVER=postgres
@@ -286,35 +245,47 @@ jobs:
             ENV_ARGS+=(OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers)
           fi
 
-          # Container Apps (Consumption plan) = scale to zero when idle,
-          # billed per vCPU-second used — same model as Railway.
-          # CPU/memory set to 4.0/8.0Gi to approximate Railway's 8 vCPU / 8 GB limit
-          # (Consumption plan max is 4 vCPU).
-          # The environment's VNet integration (subnet-apps) allows this Container App
-          # to resolve gyd-pg-main.private.postgres.database.azure.com.
-          az containerapp create \
-            --name "gyd-lt-${{ github.run_id }}" \
-            --resource-group "$AZ_RESOURCE_GROUP" \
-            --environment "$AZ_CA_ENV" \
-            --image "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
-            --registry-server "$ACR_LOGIN_SERVER" \
-            --registry-username "$ACR_NAME" \
-            --registry-password "$ACR_ADMIN_PASSWORD" \
-            --target-port 8080 \
-            --ingress external \
-            --min-replicas 0 \
-            --max-replicas 10 \
-            --cpu 4.0 --memory 8.0Gi \
-            --secrets "${SECRETS_ARGS[@]}" \
-            --env-vars "${ENV_ARGS[@]}"
+          # Persistent Container App: update image + secrets on each run.
+          # Create on first run only (environment gyd-lt-env is also persistent).
+          # Scales to 0 when idle — no cost between runs.
+          if az containerapp show --name gyd-lt --resource-group gyd-persistent &>/dev/null 2>&1; then
+            echo "Container App exists — updating secrets and image"
+            az containerapp secret set \
+              --name gyd-lt --resource-group gyd-persistent \
+              --secrets "${SECRETS_ARGS[@]}"
+            az containerapp registry set \
+              --name gyd-lt --resource-group gyd-persistent \
+              --server gydltpersistent.azurecr.io \
+              --username gydltpersistent \
+              --password-secret-ref acr-password
+            az containerapp update \
+              --name gyd-lt --resource-group gyd-persistent \
+              --image "gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}"
+          else
+            echo "Container App not found — creating"
+            az containerapp create \
+              --name gyd-lt \
+              --resource-group gyd-persistent \
+              --environment gyd-lt-env \
+              --image "gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}" \
+              --registry-server gydltpersistent.azurecr.io \
+              --registry-username gydltpersistent \
+              --registry-password "$ACR_ADMIN_PASSWORD" \
+              --target-port 8080 \
+              --ingress external \
+              --min-replicas 0 \
+              --max-replicas 10 \
+              --cpu 4.0 --memory 8.0Gi \
+              --secrets "${SECRETS_ARGS[@]}" \
+              --env-vars "${ENV_ARGS[@]}"
+          fi
 
-          # Container Apps issues a stable HTTPS FQDN automatically
           APP_FQDN=$(az containerapp show \
-            --name "gyd-lt-${{ github.run_id }}" \
-            --resource-group "$AZ_RESOURCE_GROUP" \
+            --name gyd-lt \
+            --resource-group gyd-persistent \
             --query "properties.configuration.ingress.fqdn" -o tsv)
           echo "LOAD_TEST_URL=https://${APP_FQDN}" >> $GITHUB_ENV
-          echo "Container App deployed: https://${APP_FQDN}"
+          echo "Container App: https://${APP_FQDN}"
 
       # ── Provider-agnostic ──────────────────────────────────────────────────────
       - name: Wait for load-test service to be healthy
@@ -329,14 +300,14 @@ jobs:
         run: |
           echo "=== Container App revision status ==="
           az containerapp revision list \
-            --name "gyd-lt-${{ github.run_id }}" \
-            --resource-group "$AZ_RESOURCE_GROUP" \
+            --name gyd-lt \
+            --resource-group gyd-persistent \
             --query "[].{name:name,replicas:properties.replicas,healthState:properties.healthState,runningState:properties.runningState}" \
             -o table 2>/dev/null || true
           echo "=== Container App logs (last 100 lines) ==="
           az containerapp logs show \
-            --name "gyd-lt-${{ github.run_id }}" \
-            --resource-group "$AZ_RESOURCE_GROUP" \
+            --name gyd-lt \
+            --resource-group gyd-persistent \
             --tail 100 2>/dev/null || true
 
       - name: Set up Python
@@ -420,14 +391,4 @@ jobs:
           path: load_testing/results/
           retention-days: 30
 
-      # ── Azure teardown (runs even if earlier steps failed) ────────────────────
-      - name: Teardown Azure infra
-        if: always() && inputs.provider == 'azure'
-        run: |
-          # az group delete cascades to ACR, Container Apps env, and all nested resources.
-          # The persistent gyd-persistent RG is NOT touched here.
-          # --no-wait: VNet-integrated Container Apps Environments take 10+ min to delete.
-          # The pre-provision cleanup step in the next run will wait for the subnet to free.
-          az group delete \
-            --name "gyd-lt-${{ github.run_id }}" \
-            --yes --no-wait 2>/dev/null || true
+      # ── Azure: no teardown — all resources are persistent and scale to zero ──────

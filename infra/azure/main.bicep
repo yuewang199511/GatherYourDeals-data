@@ -1,3 +1,7 @@
+// DEPRECATED: ACR and Container Apps Environment are now persistent resources
+// defined in infra/azure/persistent/resources.bicep. This file is no longer
+// used by CI and is retained for reference only.
+
 param runId string
 param location string = 'eastus'
 param appsSubnetId string

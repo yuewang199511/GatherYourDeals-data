@@ -106,8 +106,40 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
   name: 'gatheryourdeals'
 }
 
+// ── Container Registry ─────────────────────────────────────────────────────────
+// Persistent ACR: images pushed on every CI run; never torn down between runs.
+// Basic SKU; adminUserEnabled lets CI authenticate for image push/pull.
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+  name: 'gydltpersistent'
+  location: location
+  sku: {
+    name: 'Basic'
+  }
+  properties: {
+    adminUserEnabled: true
+  }
+}
+
+// ── Container Apps Environment ─────────────────────────────────────────────────
+// Persistent, VNet-integrated. The Container App (gyd-lt) is created or updated
+// by CI on each run — the environment itself is never torn down.
+// Provision time: ~5-10 min (one-time only).
+resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
+  name: 'gyd-lt-env'
+  location: location
+  properties: {
+    vnetConfiguration: {
+      infrastructureSubnetId: subnetApps.id
+    }
+  }
+  dependsOn: [subnetApps]
+}
+
 // ── Outputs ───────────────────────────────────────────────────────────────────
 
 output subnetAppsId string = subnetApps.id
 output subnetPgId string = subnetPg.id
 output postgresqlFqdn string = postgres.properties.fullyQualifiedDomainName
+output acrLoginServer string = acr.properties.loginServer
+output acrName string = acr.name
+output caEnvName string = caEnv.name

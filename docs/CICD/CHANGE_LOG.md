@@ -23,3 +23,4 @@ Design decisions and significant infrastructure changes. Routine report addition
 | 2026-03-29 | — | Made otel-headers Container App secret conditional | Empty OTEL_EXPORTER_OTLP_HEADERS secret caused ContainerAppSecretInvalid; skip secret when unset |
 | 2026-03-29 | — | Added pre-provision subnet cleanup + synchronous teardown | ManagedEnvironmentSubnetInUse blocked new runs; --no-wait teardown left subnet occupied; now waits for full deletion |
 | 2026-03-29 | — | Bypass private DNS resolution — use PostgreSQL private IP from DNS zone | Container Apps DNS (127.0.0.11) cannot resolve private DNS zones; resolve IP at CI time and inject directly into DSN |
+| 2026-03-29 | #102 | Made ACR + Container App Environment + Container App persistent | All resources scale to 0 when idle (no cost); eliminates subnet conflict cleanup, provision wait, and 10+ min teardown per run |
