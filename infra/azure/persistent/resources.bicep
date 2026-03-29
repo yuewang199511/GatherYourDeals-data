@@ -3,80 +3,17 @@ param location string
 @secure()
 param pgAdminPassword string
 
-// ── Networking ────────────────────────────────────────────────────────────────
-
-resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
-  name: 'gyd-vnet'
-  location: location
-  properties: {
-    addressSpace: {
-      addressPrefixes: ['10.0.0.0/16']
-    }
-  }
-}
-
-resource subnetPg 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: vnet
-  name: 'subnet-pg'
-  properties: {
-    addressPrefix: '10.0.1.0/24'
-    delegations: [
-      {
-        name: 'pg-delegation'
-        properties: {
-          serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers'
-        }
-      }
-    ]
-  }
-}
-
-resource subnetApps 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: vnet
-  name: 'subnet-apps'
-  properties: {
-    addressPrefix: '10.0.2.0/24'
-    delegations: [
-      {
-        name: 'apps-delegation'
-        properties: {
-          serviceName: 'Microsoft.App/environments'
-        }
-      }
-    ]
-  }
-  dependsOn: [subnetPg]
-}
-
-// ── Private DNS ───────────────────────────────────────────────────────────────
-
-resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: 'gyd-pg-main.private.postgres.database.azure.com'
-  location: 'global'
-}
-
-resource dnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  parent: privateDnsZone
-  name: 'gyd-vnet-pg-dns-link'
-  location: 'global'
-  properties: {
-    virtualNetwork: {
-      id: vnet.id
-    }
-    registrationEnabled: false
-  }
-}
-
 // ── PostgreSQL Flexible Server ─────────────────────────────────────────────────
-// Always-on Burstable B1ms (~$15/mo). DSN stored in GitHub secret
-// AZURE_PG_DSN_PERSISTENT. Admin password stored in Bitwarden.
-
+// Always-on Burstable B1ms (~$15/mo). Public access; protected by firewall rule
+// that restricts to Azure-backbone traffic only (blocks public internet scanners).
+// Admin DSN stored in GitHub secret AZURE_PG_DSN_PERSISTENT.
+// No VNet — services connect via public FQDN; no private DNS needed.
 resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: 'gyd-pg-main'
   location: location
   sku: {
-    name: 'Standard_D2s_v3'
-    tier: 'GeneralPurpose'
+    name: 'Standard_B1ms'
+    tier: 'Burstable'
   }
   properties: {
     administratorLogin: 'gydadmin'
@@ -90,15 +27,24 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
       geoRedundantBackup: 'Disabled'
     }
     network: {
-      delegatedSubnetResourceId: subnetPg.id
-      privateDnsZoneArmResourceId: privateDnsZone.id
-      publicNetworkAccess: 'Disabled'
+      publicNetworkAccess: 'Enabled'
     }
     highAvailability: {
       mode: 'Disabled'
     }
   }
-  dependsOn: [dnsVnetLink]
+}
+
+// Allow all Azure-backbone traffic; blocks public internet scanners/bots.
+// 0.0.0.0→0.0.0.0 is the Azure special flag for "allow Azure services only" —
+// it is NOT the same as 0.0.0.0→255.255.255.255 (fully open).
+resource pgFirewallAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
+  parent: postgres
+  name: 'allow-azure-services'
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
+  }
 }
 
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
@@ -106,33 +52,8 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
   name: 'gatheryourdeals'
 }
 
-// ── Built-in PgBouncer ────────────────────────────────────────────────────────
-// Native PgBouncer requires General Purpose or Memory Optimized tier (not Burstable).
-// Listens on port 6432 on the same FQDN — no sidecar needed.
-// Session mode matches Railway behaviour; transaction mode is more efficient but
-// requires apps to avoid advisory locks and persistent SET commands.
-resource pgBouncerEnabled 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
-  parent: postgres
-  name: 'pgbouncer.enabled'
-  properties: {
-    value: 'true'
-    source: 'user-override'
-  }
-}
-
-resource pgBouncerPoolMode 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
-  parent: postgres
-  name: 'pgbouncer.pool_mode'
-  properties: {
-    value: 'session'
-    source: 'user-override'
-  }
-  dependsOn: [pgBouncerEnabled]
-}
-
 // ── Container Registry ─────────────────────────────────────────────────────────
 // Persistent ACR: images pushed on every CI run; never torn down between runs.
-// Basic SKU; adminUserEnabled lets CI authenticate for image push/pull.
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: 'gydltpersistent'
   location: location
@@ -145,23 +66,16 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
 }
 
 // ── Container Apps Environment ─────────────────────────────────────────────────
-// Persistent, VNet-integrated. The Container App (gyd-lt) is created or updated
-// by CI on each run — the environment itself is never torn down.
-// Provision time: ~5-10 min (one-time only).
+// No VNet integration — pgBouncer and app Container Apps use internal ingress DNS
+// for service-to-service communication within this environment.
+// pgBouncer and gyd-lt Container Apps are deployed by CI, not here.
 resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
   name: 'gyd-lt-env'
   location: location
-  properties: {
-    vnetConfiguration: {
-      infrastructureSubnetId: subnetApps.id
-    }
-  }
+  properties: {}
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
-
-output subnetAppsId string = subnetApps.id
-output subnetPgId string = subnetPg.id
 output postgresqlFqdn string = postgres.properties.fullyQualifiedDomainName
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name

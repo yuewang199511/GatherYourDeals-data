@@ -126,76 +126,29 @@ jobs:
           # Contributor role cannot bulk-register all providers (Terraform's default).
           # Register only the namespaces this stack uses; idempotent if already registered.
           az provider register --namespace Microsoft.ContainerRegistry --wait
-          az provider register --namespace Microsoft.Network --wait
           az provider register --namespace Microsoft.App --wait
           az provider register --namespace Microsoft.OperationalInsights --wait
 
-      - name: Diagnose persistent network config
+      - name: Set persistent resource names (Azure)
         if: inputs.provider == 'azure'
         run: |
-          echo "=== VNet DNS servers ==="
-          az network vnet show \
-            --name gyd-vnet --resource-group gyd-persistent \
-            --query "dhcpOptions.dnsServers" -o tsv 2>/dev/null || echo "(none — using Azure default)"
-          echo "=== Private DNS zone ==="
-          az network private-dns zone show \
-            --name "gyd-pg-main.private.postgres.database.azure.com" \
-            --resource-group gyd-persistent -o table 2>/dev/null || echo "MISSING"
-          echo "=== DNS zone A records ==="
-          az network private-dns record-set a list \
-            --zone-name "gyd-pg-main.private.postgres.database.azure.com" \
-            --resource-group gyd-persistent \
-            --query "[].{name:name,ip:aRecords[0].ipv4Address}" -o table 2>/dev/null || echo "NONE"
-          echo "=== VNet links for the DNS zone ==="
-          az network private-dns link vnet list \
-            --zone-name "gyd-pg-main.private.postgres.database.azure.com" \
-            --resource-group gyd-persistent \
-            --query "[].{name:name,vnet:virtualNetwork.id,state:registrationEnabled}" -o table 2>/dev/null || echo "NONE"
-
-      - name: Set persistent resource names and resolve PG private IP (Azure)
-        if: inputs.provider == 'azure'
-        run: |
-          # All Azure load-test resources are persistent — no provisioning needed per run.
           echo "ACR_LOGIN_SERVER=gydltpersistent.azurecr.io" >> $GITHUB_ENV
           echo "ACR_NAME=gydltpersistent" >> $GITHUB_ENV
           echo "AZ_RESOURCE_GROUP=gyd-persistent" >> $GITHUB_ENV
+          PG_FQDN=$(az postgres flexible-server show \
+            --name gyd-pg-main \
+            --resource-group gyd-persistent \
+            --query fullyQualifiedDomainName -o tsv)
+          echo "PG_FQDN=${PG_FQDN}" >> $GITHUB_ENV
 
-          # Resolve PostgreSQL private IP from the DNS zone A record.
-          # Container Apps DNS (127.0.0.11) cannot resolve private DNS zones;
-          # the app connects to the native pgBouncer at this IP on port 6432.
-          PG_ZONE="gyd-pg-main.private.postgres.database.azure.com"
-          PG_PRIVATE_IP=$(az network private-dns record-set a list \
-            --zone-name "$PG_ZONE" \
-            --resource-group "gyd-persistent" \
-            --query "[0].aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
-          if [ -z "$PG_PRIVATE_IP" ]; then
-            echo "ERROR: Cannot resolve PostgreSQL private IP from DNS zone"
-            exit 1
-          fi
-          echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
-          echo "PG_PRIVATE_IP=${PG_PRIVATE_IP}" >> $GITHUB_ENV
-
-      - name: Ensure Container Apps Environment exists (Azure)
+      - name: Run database migrations (Azure)
         if: inputs.provider == 'azure'
+        env:
+          AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
         run: |
-          if az containerapp env show \
-              --name gyd-lt-env \
-              --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "gyd-lt-env already exists — skipping creation"
-          else
-            echo "Creating gyd-lt-env (one-time, ~5-10 min)..."
-            SUBNET_ID=$(az network vnet subnet show \
-              --vnet-name gyd-vnet \
-              --resource-group gyd-persistent \
-              --name subnet-apps \
-              --query id -o tsv)
-            az containerapp env create \
-              --name gyd-lt-env \
-              --resource-group gyd-persistent \
-              --location westus3 \
-              --infrastructure-subnet-resource-id "$SUBNET_ID"
-            echo "gyd-lt-env created"
-          fi
+          go install github.com/pressly/goose/v3/cmd/goose@latest
+          goose -dir internal/repository/postgres/migrations \
+            postgres "$AZURE_PG_DSN" up
 
       - name: Set up Docker Buildx
         if: inputs.provider == 'azure'
@@ -220,7 +173,7 @@ jobs:
             -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
             -f Dockerfile .
 
-      - name: Resolve APP_DSN (Azure)
+      - name: Deploy pgBouncer Container App (Azure)
         if: inputs.provider == 'azure'
         env:
           AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
@@ -228,9 +181,47 @@ jobs:
           PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
           PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
 
-          # Native pgBouncer runs on the PostgreSQL server at port 6432.
-          # Use private IP directly — Container Apps DNS can't resolve private zones.
-          APP_DSN="postgres://${PG_USER}:${PG_PASS}@${PG_PRIVATE_IP}:6432/gatheryourdeals?sslmode=require"
+          if az containerapp show --name gyd-pgbouncer --resource-group gyd-persistent &>/dev/null 2>&1; then
+            echo "gyd-pgbouncer exists — updating password secret"
+            az containerapp secret set \
+              --name gyd-pgbouncer \
+              --resource-group gyd-persistent \
+              --secrets "pg-password=${PG_PASS}"
+          else
+            echo "Creating gyd-pgbouncer"
+            az containerapp create \
+              --name gyd-pgbouncer \
+              --resource-group gyd-persistent \
+              --environment gyd-lt-env \
+              --image edoburu/pgbouncer:latest \
+              --ingress internal \
+              --target-port 5432 \
+              --min-replicas 1 \
+              --max-replicas 1 \
+              --cpu 0.25 \
+              --memory 0.5Gi \
+              --secrets "pg-password=${PG_PASS}" \
+              --env-vars \
+                "DB_HOST=${PG_FQDN}" \
+                "DB_PORT=5432" \
+                "DB_USER=${PG_USER}" \
+                "DB_PASSWORD=secretref:pg-password" \
+                "DB_NAME=gatheryourdeals" \
+                "POOL_MODE=session" \
+                "MAX_CLIENT_CONN=100" \
+                "DEFAULT_POOL_SIZE=20" \
+                "SERVER_TLS_SSLMODE=require" \
+                "AUTH_TYPE=trust"
+          fi
+
+          # Internal FQDN: reachable only within the Container Apps Environment.
+          ENV_DOMAIN=$(az containerapp env show \
+            --name gyd-lt-env \
+            --resource-group gyd-persistent \
+            --query properties.defaultDomain -o tsv)
+          PGBOUNCER_HOST="gyd-pgbouncer.internal.${ENV_DOMAIN}"
+          PG_PASS_ENC=$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "${PG_PASS}")
+          APP_DSN="postgres://${PG_USER}:${PG_PASS_ENC}@${PGBOUNCER_HOST}:5432/gatheryourdeals?sslmode=disable"
           echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
 
       - name: Deploy gyd-lt to Azure Container Apps
@@ -299,7 +290,7 @@ jobs:
           fi
 
           # Always: update image, resources, and scale settings.
-          # Native pgBouncer runs on the PostgreSQL server — no sidecar needed.
+          # App connects to pgBouncer (internal) which proxies to PostgreSQL (public FQDN).
           # 2 replicas × 4.0 vCPU = 8 vCPU total, matching Railway node resources.
           # CPU scale-out at 70% utilization.
           cat > /tmp/gyd-lt-update.yaml << YAML
@@ -415,17 +406,16 @@ YAML
       - name: Seed load-test database (Azure)
         if: inputs.provider == 'azure'
         env:
+          AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
           GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
           GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
           GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
         run: |
-          # PostgreSQL is VNet-private — CI cannot connect directly for a TRUNCATE.
-          # seed.py is idempotent: 409 on duplicate user is handled gracefully.
-          # On a fresh persistent DB the tables are empty; on repeat runs old
-          # receipts accumulate but do not affect test correctness (guardrail
-          # checks ≥1000 receipts, not exactly 1000).
+          # PostgreSQL is publicly accessible — CI connects directly for a clean TRUNCATE.
+          RESET_SQL="TRUNCATE receipts CASCADE; TRUNCATE meta_fields CASCADE; DELETE FROM users WHERE role != 'admin';"
+          psql "$AZURE_PG_DSN" -c "$RESET_SQL"
           cd load_testing && python3 seed.py
 
       - name: Run load tests
