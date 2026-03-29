@@ -148,6 +148,7 @@ resource pgbouncer 'Microsoft.App/containerApps@2023-05-01' = {
       ingress: {
         external: false
         targetPort: 6432
+        exposedPort: 6432
         transport: 'tcp'
       }
       secrets: [

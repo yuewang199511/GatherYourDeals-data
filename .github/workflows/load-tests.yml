@@ -246,7 +246,9 @@ jobs:
             --name gyd-lt-env \
             --resource-group gyd-persistent \
             --query "properties.defaultDomain" -o tsv)
-          APP_DSN="postgres://${PG_USER}:${PG_PASS}@gyd-pgbouncer.internal.${CA_DEFAULT_DOMAIN}:6432/gatheryourdeals?sslmode=disable"
+          # Internal TCP apps in a CA environment are reached via just the app name + port.
+          # The .internal.<domain> FQDN is for HTTP; TCP uses <app-name>:<port>.
+          APP_DSN="postgres://${PG_USER}:${PG_PASS}@gyd-pgbouncer:6432/gatheryourdeals?sslmode=disable"
           echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
 
       - name: Deploy gyd-lt to Azure Container Apps
