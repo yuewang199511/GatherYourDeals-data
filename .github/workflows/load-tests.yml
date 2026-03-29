@@ -183,14 +183,10 @@ jobs:
           PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
           PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
 
-          # PG_DIRECT_DSN: PgBouncer sidecar → PostgreSQL (real IP, port 5432, TLS required)
+          # PG_DIRECT_DSN: gyd-pgbouncer Container App → PostgreSQL (real IP, port 5432, TLS required)
           PG_DIRECT_DSN="postgres://${PG_USER}:${PG_PASS}${HOST_PART}:5432/gatheryourdeals?sslmode=require"
 
-          # APP_DSN: Go service → PgBouncer sidecar on localhost (no TLS on loopback)
-          APP_DSN="postgres://${PG_USER}:${PG_PASS}@localhost:6432/gatheryourdeals?sslmode=disable"
-
           echo "PG_DIRECT_DSN=$PG_DIRECT_DSN" >> $GITHUB_ENV
-          echo "APP_DSN=$APP_DSN" >> $GITHUB_ENV
 
       - name: Ensure Container Apps Environment exists (Azure)
         if: inputs.provider == 'azure'
@@ -237,7 +233,52 @@ jobs:
             -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
             -f Dockerfile .
 
-      - name: Deploy app to Azure Container Apps
+      - name: Ensure pgBouncer Container App exists (Azure)
+        if: inputs.provider == 'azure'
+        env:
+          AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
+        run: |
+          PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
+          PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
+
+          # Within the same CA environment, apps are reachable at <app-name>.<defaultDomain>.
+          CA_DEFAULT_DOMAIN=$(az containerapp env show \
+            --name gyd-lt-env \
+            --resource-group gyd-persistent \
+            --query "properties.defaultDomain" -o tsv)
+          APP_DSN="postgres://${PG_USER}:${PG_PASS}@gyd-pgbouncer.${CA_DEFAULT_DOMAIN}:6432/gatheryourdeals?sslmode=disable"
+          echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
+
+          if az containerapp show \
+              --name gyd-pgbouncer \
+              --resource-group gyd-persistent &>/dev/null 2>&1; then
+            echo "gyd-pgbouncer already exists — skipping creation"
+          else
+            echo "Creating gyd-pgbouncer..."
+            az containerapp create \
+              --name gyd-pgbouncer \
+              --resource-group gyd-persistent \
+              --environment gyd-lt-env \
+              --image edoburu/pgbouncer:1.23.1 \
+              --min-replicas 1 \
+              --max-replicas 1 \
+              --cpu 0.25 \
+              --memory 0.5Gi \
+              --ingress internal \
+              --target-port 6432 \
+              --transport tcp \
+              --secrets "pg-dsn=${PG_DIRECT_DSN}" \
+              --env-vars \
+                "DATABASE_URL=secretref:pg-dsn" \
+                "POOL_MODE=session" \
+                "DEFAULT_POOL_SIZE=50" \
+                "MAX_CLIENT_CONN=200" \
+                "LISTEN_PORT=6432" \
+                "SERVER_TLS_SSLMODE=require"
+            echo "gyd-pgbouncer created"
+          fi
+
+      - name: Deploy gyd-lt to Azure Container Apps
         if: inputs.provider == 'azure'
         env:
           OTEL_HEADERS_SECRET: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
@@ -248,48 +289,54 @@ jobs:
           ACR_ADMIN_PASSWORD=$(az acr credential show \
             --name gydltpersistent \
             --query "passwords[0].value" -o tsv)
+          IMAGE="${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}"
 
-          # Fetch CA Environment resource ID (required for YAML create)
-          ENV_ID=$(az containerapp env show \
-            --name gyd-lt-env \
-            --resource-group gyd-persistent \
-            --query id -o tsv)
-
-          # Stamp the committed template into a working copy and substitute placeholders.
-          # The template lives in infra/azure/persistent/container-app.yaml; no heredoc
-          # is used here because heredoc content at column 0 breaks the workflow YAML parser.
-          cp infra/azure/persistent/container-app.yaml /tmp/gyd-lt.yaml
-
-          # Use | as sed delimiter — values may contain slashes (DSN, image refs).
-          sed -i "s|__ENV_ID__|${ENV_ID}|g"                         /tmp/gyd-lt.yaml
-          sed -i "s|__IMAGE__|gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}|g" /tmp/gyd-lt.yaml
-          sed -i "s|__ACR_PASSWORD__|${ACR_ADMIN_PASSWORD}|g"       /tmp/gyd-lt.yaml
-          sed -i "s|__PG_DSN__|${PG_DIRECT_DSN}|g"                  /tmp/gyd-lt.yaml
-          sed -i "s|__APP_DSN__|${APP_DSN}|g"                       /tmp/gyd-lt.yaml
-          sed -i "s|__ADMIN_USERNAME__|${GYD_ADMIN_USERNAME_VAL}|g" /tmp/gyd-lt.yaml
-          sed -i "s|__ADMIN_PASSWORD__|${GYD_ADMIN_PASSWORD_SECRET}|g" /tmp/gyd-lt.yaml
-          sed -i "s|__JWT_SECRET__|${GYD_JWT_SECRET_SECRET}|g"      /tmp/gyd-lt.yaml
-
-          # OTEL headers: substitute if set, remove those lines if unset.
-          if [ -n "$OTEL_HEADERS_SECRET" ]; then
-            sed -i "s|__OTEL_HEADERS__|${OTEL_HEADERS_SECRET}|g" /tmp/gyd-lt.yaml
-          else
-            sed -i '/__OTEL_HEADERS__/d' /tmp/gyd-lt.yaml
-          fi
-
-          # Create or update (--yaml replaces full spec including secrets and containers)
-          if az containerapp show --name gyd-lt --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "Container App exists — updating with new image and sidecar config"
+          if az containerapp show \
+              --name gyd-lt \
+              --resource-group gyd-persistent &>/dev/null 2>&1; then
+            echo "Container App exists — updating image"
             az containerapp update \
               --name gyd-lt \
               --resource-group gyd-persistent \
-              --yaml /tmp/gyd-lt.yaml
+              --image "${IMAGE}"
           else
-            echo "Container App not found — creating with PgBouncer sidecar"
+            echo "Container App not found — creating"
+            SECRETS_ARGS=(
+              "app-database-url=${APP_DSN}"
+              "gyd-admin-password=${GYD_ADMIN_PASSWORD_SECRET}"
+              "gyd-jwt-secret=${GYD_JWT_SECRET_SECRET}"
+            )
+            ENV_VARS_ARGS=(
+              "GYD_DATABASE_DRIVER=postgres"
+              "DATABASE_URL=secretref:app-database-url"
+              "GYD_ADMIN_USERNAME=${GYD_ADMIN_USERNAME_VAL}"
+              "GYD_ADMIN_PASSWORD=secretref:gyd-admin-password"
+              "GYD_JWT_SECRET=secretref:gyd-jwt-secret"
+              "OTEL_SERVICE_NAME=gatheryourdeals"
+              "OTEL_RESOURCE_ATTRIBUTES=service.environment=load-test,platform.name=azure,db.type=postgres"
+              "OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io"
+            )
+            if [ -n "${OTEL_HEADERS_SECRET}" ]; then
+              SECRETS_ARGS+=("otel-headers=${OTEL_HEADERS_SECRET}")
+              ENV_VARS_ARGS+=("OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers")
+            fi
             az containerapp create \
               --name gyd-lt \
               --resource-group gyd-persistent \
-              --yaml /tmp/gyd-lt.yaml
+              --environment gyd-lt-env \
+              --image "${IMAGE}" \
+              --registry-server gydltpersistent.azurecr.io \
+              --registry-username gydltpersistent \
+              --registry-password "${ACR_ADMIN_PASSWORD}" \
+              --target-port 8080 \
+              --ingress external \
+              --transport http \
+              --min-replicas 0 \
+              --max-replicas 1 \
+              --cpu 3.75 \
+              --memory 7.5Gi \
+              --secrets "${SECRETS_ARGS[@]}" \
+              --env-vars "${ENV_VARS_ARGS[@]}"
           fi
 
           APP_FQDN=$(az containerapp show \
