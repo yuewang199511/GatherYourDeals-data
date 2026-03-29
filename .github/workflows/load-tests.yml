@@ -287,6 +287,7 @@ jobs:
           else
             echo "Container App not found — creating with PgBouncer sidecar"
             az containerapp create \
+              --name gyd-lt \
               --resource-group gyd-persistent \
               --yaml /tmp/gyd-lt.yaml
           fi
