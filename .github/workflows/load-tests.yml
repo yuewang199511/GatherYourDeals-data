@@ -152,10 +152,8 @@ jobs:
             --resource-group gyd-persistent \
             --query "[].{name:name,vnet:virtualNetwork.id,state:registrationEnabled}" -o table 2>/dev/null || echo "NONE"
 
-      - name: Set persistent resource names and resolve PG DSN (Azure)
+      - name: Set persistent resource names and resolve PG private IP (Azure)
         if: inputs.provider == 'azure'
-        env:
-          AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
         run: |
           # All Azure load-test resources are persistent — no provisioning needed per run.
           echo "ACR_LOGIN_SERVER=gydltpersistent.azurecr.io" >> $GITHUB_ENV
@@ -164,29 +162,18 @@ jobs:
 
           # Resolve PostgreSQL private IP from the DNS zone A record.
           # Container Apps DNS (127.0.0.11) cannot resolve private DNS zones;
-          # inject the IP directly into the DSN to bypass DNS entirely.
+          # the pgBouncer sidecar uses this IP directly to reach PostgreSQL.
           PG_ZONE="gyd-pg-main.private.postgres.database.azure.com"
           PG_PRIVATE_IP=$(az network private-dns record-set a list \
             --zone-name "$PG_ZONE" \
             --resource-group "gyd-persistent" \
             --query "[0].aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
-
-          if [ -n "$PG_PRIVATE_IP" ]; then
-            echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
-            HOST_PART="@${PG_PRIVATE_IP}"
-          else
-            echo "WARNING: Could not resolve PostgreSQL private IP — using private hostname"
-            HOST_PART="@gyd-pg-main.private.postgres.database.azure.com"
+          if [ -z "$PG_PRIVATE_IP" ]; then
+            echo "ERROR: Cannot resolve PostgreSQL private IP from DNS zone"
+            exit 1
           fi
-
-          # Extract credentials from the secret DSN using Python URL parser (handles special chars)
-          PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
-          PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
-
-          # PG_DIRECT_DSN: gyd-pgbouncer Container App → PostgreSQL (real IP, port 5432, TLS required)
-          PG_DIRECT_DSN="postgres://${PG_USER}:${PG_PASS}${HOST_PART}:5432/gatheryourdeals?sslmode=require"
-
-          echo "PG_DIRECT_DSN=$PG_DIRECT_DSN" >> $GITHUB_ENV
+          echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
+          echo "PG_PRIVATE_IP=${PG_PRIVATE_IP}" >> $GITHUB_ENV
 
       - name: Ensure Container Apps Environment exists (Azure)
         if: inputs.provider == 'azure'
@@ -233,7 +220,7 @@ jobs:
             -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
             -f Dockerfile .
 
-      - name: Resolve APP_DSN from pgBouncer internal address (Azure)
+      - name: Resolve APP_DSN and pgBouncer DSN (Azure)
         if: inputs.provider == 'azure'
         env:
           AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
@@ -241,15 +228,15 @@ jobs:
           PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
           PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
 
-          # gyd-pgbouncer is a persistent Bicep resource; reachable at <app>.<defaultDomain>.
-          CA_DEFAULT_DOMAIN=$(az containerapp env show \
-            --name gyd-lt-env \
-            --resource-group gyd-persistent \
-            --query "properties.defaultDomain" -o tsv)
-          # Internal TCP apps in a CA environment are reached via just the app name + port.
-          # The .internal.<domain> FQDN is for HTTP; TCP uses <app-name>:<port>.
-          APP_DSN="postgres://${PG_USER}:${PG_PASS}@gyd-pgbouncer:6432/gatheryourdeals?sslmode=disable"
+          # pgBouncer runs as a sidecar — reachable at localhost:6432, no DNS needed
+          APP_DSN="postgres://${PG_USER}:${PG_PASS}@localhost:6432/gatheryourdeals?sslmode=disable"
           echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
+
+          # pgBouncer sidecar → PostgreSQL: use private IP directly (CA DNS can't resolve private zones)
+          # TLS handled by SERVER_TLS_SSLMODE=require env var — no ?sslmode= in URL (pgBouncer
+          # parses ?sslmode= as part of the database name, corrupting pgbouncer.ini)
+          PG_BOUNCER_DSN="postgres://${PG_USER}:${PG_PASS}@${PG_PRIVATE_IP}:5432/gatheryourdeals"
+          echo "PG_BOUNCER_DSN=${PG_BOUNCER_DSN}" >> $GITHUB_ENV
 
       - name: Deploy gyd-lt to Azure Container Apps
         if: inputs.provider == 'azure'
@@ -267,15 +254,19 @@ jobs:
           if az containerapp show \
               --name gyd-lt \
               --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "Container App exists — updating image"
-            az containerapp update \
+            echo "Container App exists — updating DSN secrets"
+            # Update DSNs each run (PG_PRIVATE_IP may change if resources are recreated)
+            az containerapp secret set \
               --name gyd-lt \
               --resource-group gyd-persistent \
-              --image "${IMAGE}"
+              --secrets \
+                "app-database-url=${APP_DSN}" \
+                "pg-dsn=${PG_BOUNCER_DSN}"
           else
             echo "Container App not found — creating"
             SECRETS_ARGS=(
               "app-database-url=${APP_DSN}"
+              "pg-dsn=${PG_BOUNCER_DSN}"
               "gyd-admin-password=${GYD_ADMIN_PASSWORD_SECRET}"
               "gyd-jwt-secret=${GYD_JWT_SECRET_SECRET}"
             )
@@ -311,6 +302,69 @@ jobs:
               --secrets "${SECRETS_ARGS[@]}" \
               --env-vars "${ENV_VARS_ARGS[@]}"
           fi
+
+          # Always: deploy pgBouncer as a sidecar alongside the main app.
+          # Sidecar = localhost:6432; no DNS resolution needed, eliminates Azure
+          # Container Apps internal TCP service discovery issues.
+          # Each gyd-lt replica gets its own pgBouncer (1:1 scaling).
+          # AUTH_TYPE=plain: pgBouncer stores plaintext password, required for
+          # SCRAM-SHA-256 auth to Azure PostgreSQL (MD5 hash blocks SCRAM).
+          cat > /tmp/gyd-lt-sidecar.yaml << YAML
+properties:
+  template:
+    containers:
+      - name: gatheryourdeals
+        image: ${IMAGE}
+        resources:
+          cpu: 3.75
+          memory: 7.5Gi
+        env:
+          - name: GYD_DATABASE_DRIVER
+            value: postgres
+          - name: DATABASE_URL
+            secretRef: app-database-url
+          - name: GYD_ADMIN_USERNAME
+            value: ${GYD_ADMIN_USERNAME_VAL}
+          - name: GYD_ADMIN_PASSWORD
+            secretRef: gyd-admin-password
+          - name: GYD_JWT_SECRET
+            secretRef: gyd-jwt-secret
+          - name: OTEL_SERVICE_NAME
+            value: gatheryourdeals
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: service.environment=load-test,platform.name=azure,db.type=postgres
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: https://api.honeycomb.io
+          - name: OTEL_EXPORTER_OTLP_HEADERS
+            secretRef: otel-headers
+      - name: pgbouncer
+        image: edoburu/pgbouncer:v1.23.1-p3
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: pg-dsn
+          - name: POOL_MODE
+            value: session
+          - name: DEFAULT_POOL_SIZE
+            value: "50"
+          - name: MAX_CLIENT_CONN
+            value: "200"
+          - name: LISTEN_PORT
+            value: "6432"
+          - name: SERVER_TLS_SSLMODE
+            value: require
+          - name: AUTH_TYPE
+            value: plain
+    scale:
+      minReplicas: 0
+      maxReplicas: 1
+YAML
+          az containerapp update \
+            --name gyd-lt \
+            --resource-group gyd-persistent \
+            --yaml /tmp/gyd-lt-sidecar.yaml
 
           APP_FQDN=$(az containerapp show \
             --name gyd-lt \
