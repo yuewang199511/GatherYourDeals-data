@@ -176,7 +176,9 @@ jobs:
         if: inputs.provider == 'azure'
         run: |
           RG_NAME="gyd-lt-${{ github.run_id }}"
-          LOCATION="eastus"
+          # Persistent VNet is in westus3 — ephemeral RG + Container Apps env must
+          # be in the same region for VNet integration to work.
+          LOCATION="westus3"
           APPS_SUBNET_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/gyd-persistent/providers/Microsoft.Network/virtualNetworks/gyd-vnet/subnets/subnet-apps"
 
           az group create --name "$RG_NAME" --location "$LOCATION"
