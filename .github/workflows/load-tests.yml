@@ -162,7 +162,7 @@ jobs:
 
           # Resolve PostgreSQL private IP from the DNS zone A record.
           # Container Apps DNS (127.0.0.11) cannot resolve private DNS zones;
-          # the pgBouncer sidecar uses this IP directly to reach PostgreSQL.
+          # the app connects to the native pgBouncer at this IP on port 6432.
           PG_ZONE="gyd-pg-main.private.postgres.database.azure.com"
           PG_PRIVATE_IP=$(az network private-dns record-set a list \
             --zone-name "$PG_ZONE" \
@@ -220,7 +220,7 @@ jobs:
             -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
             -f Dockerfile .
 
-      - name: Resolve APP_DSN and pgBouncer DSN (Azure)
+      - name: Resolve APP_DSN (Azure)
         if: inputs.provider == 'azure'
         env:
           AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
@@ -228,15 +228,10 @@ jobs:
           PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
           PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
 
-          # pgBouncer runs as a sidecar — reachable at localhost:6432, no DNS needed
-          APP_DSN="postgres://${PG_USER}:${PG_PASS}@localhost:6432/gatheryourdeals?sslmode=disable"
+          # Native pgBouncer runs on the PostgreSQL server at port 6432.
+          # Use private IP directly — Container Apps DNS can't resolve private zones.
+          APP_DSN="postgres://${PG_USER}:${PG_PASS}@${PG_PRIVATE_IP}:6432/gatheryourdeals?sslmode=require"
           echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
-
-          # pgBouncer sidecar → PostgreSQL: use private IP directly (CA DNS can't resolve private zones)
-          # TLS handled by SERVER_TLS_SSLMODE=require env var — no ?sslmode= in URL (pgBouncer
-          # parses ?sslmode= as part of the database name, corrupting pgbouncer.ini)
-          PG_BOUNCER_DSN="postgres://${PG_USER}:${PG_PASS}@${PG_PRIVATE_IP}:5432/gatheryourdeals"
-          echo "PG_BOUNCER_DSN=${PG_BOUNCER_DSN}" >> $GITHUB_ENV
 
       - name: Deploy gyd-lt to Azure Container Apps
         if: inputs.provider == 'azure'
@@ -254,19 +249,16 @@ jobs:
           if az containerapp show \
               --name gyd-lt \
               --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "Container App exists — updating DSN secrets"
-            # Update DSNs each run (PG_PRIVATE_IP may change if resources are recreated)
+            echo "Container App exists — updating app-database-url secret"
+            # Update DSN each run (PG_PRIVATE_IP may change if resources are recreated)
             az containerapp secret set \
               --name gyd-lt \
               --resource-group gyd-persistent \
-              --secrets \
-                "app-database-url=${APP_DSN}" \
-                "pg-dsn=${PG_BOUNCER_DSN}"
+              --secrets "app-database-url=${APP_DSN}"
           else
             echo "Container App not found — creating"
             SECRETS_ARGS=(
               "app-database-url=${APP_DSN}"
-              "pg-dsn=${PG_BOUNCER_DSN}"
               "gyd-admin-password=${GYD_ADMIN_PASSWORD_SECRET}"
               "gyd-jwt-secret=${GYD_JWT_SECRET_SECRET}"
             )
@@ -296,28 +288,29 @@ jobs:
               --ingress external \
               --transport http \
               --min-replicas 0 \
-              --max-replicas 1 \
-              --cpu 3.75 \
-              --memory 7.5Gi \
+              --max-replicas 2 \
+              --cpu 4.0 \
+              --memory 8.0Gi \
+              --scale-rule-name "cpu-scaling" \
+              --scale-rule-type "cpu" \
+              --scale-rule-metadata "type=Utilization" "value=70" \
               --secrets "${SECRETS_ARGS[@]}" \
               --env-vars "${ENV_VARS_ARGS[@]}"
           fi
 
-          # Always: deploy pgBouncer as a sidecar alongside the main app.
-          # Sidecar = localhost:6432; no DNS resolution needed, eliminates Azure
-          # Container Apps internal TCP service discovery issues.
-          # Each gyd-lt replica gets its own pgBouncer (1:1 scaling).
-          # AUTH_TYPE=plain: pgBouncer stores plaintext password, required for
-          # SCRAM-SHA-256 auth to Azure PostgreSQL (MD5 hash blocks SCRAM).
-          cat > /tmp/gyd-lt-sidecar.yaml << YAML
+          # Always: update image, resources, and scale settings.
+          # Native pgBouncer runs on the PostgreSQL server — no sidecar needed.
+          # 2 replicas × 4.0 vCPU = 8 vCPU total, matching Railway node resources.
+          # CPU scale-out at 70% utilization.
+          cat > /tmp/gyd-lt-update.yaml << YAML
 properties:
   template:
     containers:
       - name: gatheryourdeals
         image: ${IMAGE}
         resources:
-          cpu: 3.75
-          memory: 7.5Gi
+          cpu: 4.0
+          memory: 8.0Gi
         env:
           - name: GYD_DATABASE_DRIVER
             value: postgres
@@ -337,34 +330,21 @@ properties:
             value: https://api.honeycomb.io
           - name: OTEL_EXPORTER_OTLP_HEADERS
             secretRef: otel-headers
-      - name: pgbouncer
-        image: edoburu/pgbouncer:v1.23.1-p3
-        resources:
-          cpu: 0.25
-          memory: 0.5Gi
-        env:
-          - name: DATABASE_URL
-            secretRef: pg-dsn
-          - name: POOL_MODE
-            value: session
-          - name: DEFAULT_POOL_SIZE
-            value: "50"
-          - name: MAX_CLIENT_CONN
-            value: "200"
-          - name: LISTEN_PORT
-            value: "6432"
-          - name: SERVER_TLS_SSLMODE
-            value: require
-          - name: AUTH_TYPE
-            value: plain
     scale:
       minReplicas: 0
-      maxReplicas: 1
+      maxReplicas: 2
+      rules:
+        - name: cpu-scaling
+          custom:
+            type: cpu
+            metadata:
+              type: Utilization
+              value: "70"
 YAML
           az containerapp update \
             --name gyd-lt \
             --resource-group gyd-persistent \
-            --yaml /tmp/gyd-lt-sidecar.yaml
+            --yaml /tmp/gyd-lt-update.yaml
 
           APP_FQDN=$(az containerapp show \
             --name gyd-lt \

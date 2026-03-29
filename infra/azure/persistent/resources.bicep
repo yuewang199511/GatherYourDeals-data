@@ -75,8 +75,8 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: 'gyd-pg-main'
   location: location
   sku: {
-    name: 'Standard_B1ms'
-    tier: 'Burstable'
+    name: 'Standard_D2s_v3'
+    tier: 'GeneralPurpose'
   }
   properties: {
     administratorLogin: 'gydadmin'
@@ -104,6 +104,30 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
   parent: postgres
   name: 'gatheryourdeals'
+}
+
+// ── Built-in PgBouncer ────────────────────────────────────────────────────────
+// Native PgBouncer requires General Purpose or Memory Optimized tier (not Burstable).
+// Listens on port 6432 on the same FQDN — no sidecar needed.
+// Session mode matches Railway behaviour; transaction mode is more efficient but
+// requires apps to avoid advisory locks and persistent SET commands.
+resource pgBouncerEnabled 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'pgbouncer.enabled'
+  properties: {
+    value: 'true'
+    source: 'user-override'
+  }
+}
+
+resource pgBouncerPoolMode 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'pgbouncer.pool_mode'
+  properties: {
+    value: 'session'
+    source: 'user-override'
+  }
+  dependsOn: [pgBouncerEnabled]
 }
 
 // ── Container Registry ─────────────────────────────────────────────────────────
@@ -135,9 +159,6 @@ resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
-// Note: pgBouncer is no longer a persistent CA resource.
-// It runs as a sidecar container inside gyd-lt (deployed by CI each run).
-// Sidecar = localhost:6432; eliminates Azure CA internal TCP service discovery issues.
 
 output subnetAppsId string = subnetApps.id
 output subnetPgId string = subnetPg.id
