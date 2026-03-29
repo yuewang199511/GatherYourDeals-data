@@ -243,6 +243,22 @@ jobs:
           curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
                --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
 
+      # ── Azure: capture logs if health check fails ─────────────────────────────
+      - name: Capture Container App logs (on failure)
+        if: failure() && inputs.provider == 'azure'
+        run: |
+          echo "=== Container App revision status ==="
+          az containerapp revision list \
+            --name "gyd-lt-${{ github.run_id }}" \
+            --resource-group "$AZ_RESOURCE_GROUP" \
+            --query "[].{name:name,replicas:properties.replicas,healthState:properties.healthState,runningState:properties.runningState}" \
+            -o table 2>/dev/null || true
+          echo "=== Container App logs (last 100 lines) ==="
+          az containerapp logs show \
+            --name "gyd-lt-${{ github.run_id }}" \
+            --resource-group "$AZ_RESOURCE_GROUP" \
+            --tail 100 2>/dev/null || true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
