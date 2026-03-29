@@ -14,9 +14,7 @@
 # Optional (lines containing __OTEL_HEADERS__ are removed by sed when secret is unset):
 #   __OTEL_HEADERS__  — OTEL ingest key header (x-honeycomb-team=...)
 
-name: gyd-lt
 location: westus3
-type: Microsoft.App/containerApps
 properties:
   managedEnvironmentId: __ENV_ID__
   configuration:
