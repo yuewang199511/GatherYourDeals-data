@@ -246,7 +246,7 @@ jobs:
             --name gyd-lt-env \
             --resource-group gyd-persistent \
             --query "properties.defaultDomain" -o tsv)
-          APP_DSN="postgres://${PG_USER}:${PG_PASS}@gyd-pgbouncer.${CA_DEFAULT_DOMAIN}:6432/gatheryourdeals?sslmode=disable"
+          APP_DSN="postgres://${PG_USER}:${PG_PASS}@gyd-pgbouncer.internal.${CA_DEFAULT_DOMAIN}:6432/gatheryourdeals?sslmode=disable"
           echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
 
       - name: Deploy gyd-lt to Azure Container Apps

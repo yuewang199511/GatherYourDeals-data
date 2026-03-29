@@ -153,7 +153,9 @@ resource pgbouncer 'Microsoft.App/containerApps@2023-05-01' = {
       secrets: [
         {
           name: 'pg-dsn'
-          value: 'postgres://gydadmin:${pgAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/gatheryourdeals?sslmode=require'
+          // No ?sslmode= query param — pgBouncer parses the DB name including query strings,
+          // corrupting its .ini config. TLS is handled separately via SERVER_TLS_SSLMODE env var.
+          value: 'postgres://gydadmin:${pgAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/gatheryourdeals'
         }
       ]
     }
