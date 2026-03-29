@@ -130,6 +130,26 @@ jobs:
           az provider register --namespace Microsoft.App --wait
           az provider register --namespace Microsoft.OperationalInsights --wait
 
+      - name: Clean up stale Container App Environments on subnet-apps
+        if: inputs.provider == 'azure'
+        run: |
+          # subnet-apps allows only one Container Apps Environment at a time.
+          # Delete any stale environment (from a previous failed run) before provisioning.
+          SUBNET_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/gyd-persistent/providers/Microsoft.Network/virtualNetworks/gyd-vnet/subnets/subnet-apps"
+          STALE_ENVS=$(az containerapp env list \
+            --query "[?properties.vnetConfiguration.infrastructureSubnetId=='$SUBNET_ID'].{rg:resourceGroup,name:name}" \
+            -o tsv 2>/dev/null || true)
+          if [ -n "$STALE_ENVS" ]; then
+            echo "Found stale environments using subnet-apps:"
+            echo "$STALE_ENVS"
+            while IFS=$'\t' read -r RG NAME; do
+              echo "Deleting stale RG: $RG"
+              az group delete --name "$RG" --yes 2>/dev/null || true
+            done <<< "$STALE_ENVS"
+          else
+            echo "No stale environments found — subnet-apps is free."
+          fi
+
       - name: Provision Azure infra (RG + ACR + Container Apps env)
         if: inputs.provider == 'azure'
         env:
@@ -402,6 +422,7 @@ jobs:
           fi
           # Backstop: az group delete cascades to Container Apps and any orphaned resources.
           # The persistent gyd-persistent RG is NOT touched here.
+          # No --no-wait: subnet-apps must be fully freed before the next run can provision.
           az group delete \
             --name "gyd-lt-${{ github.run_id }}" \
-            --yes --no-wait 2>/dev/null || true
+            --yes 2>/dev/null || true

@@ -21,3 +21,4 @@ Design decisions and significant infrastructure changes. Routine report addition
 | 2026-03-28 | — | Updated Container App CPU/memory to 4.0 vCPU / 8.0 Gi | Approximate Railway's 8 vCPU / 8 GB resource limit (Consumption plan max is 4 vCPU) |
 | 2026-03-29 | — | Replaced az acr build with docker build + docker push | ACR Tasks blocked by subscription policy (TasksOperationsNotAllowed); local runner build avoids it |
 | 2026-03-29 | — | Made otel-headers Container App secret conditional | Empty OTEL_EXPORTER_OTLP_HEADERS secret caused ContainerAppSecretInvalid; skip secret when unset |
+| 2026-03-29 | — | Added pre-provision subnet cleanup + synchronous teardown | ManagedEnvironmentSubnetInUse blocked new runs; --no-wait teardown left subnet occupied; now waits for full deletion |
