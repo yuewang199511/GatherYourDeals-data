@@ -132,7 +132,6 @@ resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
       infrastructureSubnetId: subnetApps.id
     }
   }
-  dependsOn: [subnetApps]
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────

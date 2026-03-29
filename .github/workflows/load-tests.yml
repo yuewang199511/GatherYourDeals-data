@@ -260,7 +260,9 @@ jobs:
               --password-secret-ref acr-password
             az containerapp update \
               --name gyd-lt --resource-group gyd-persistent \
-              --image "gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}"
+              --image "gydltpersistent.azurecr.io/gatheryourdeals:${{ github.sha }}" \
+              --min-replicas 0 \
+              --max-replicas 1
           else
             echo "Container App not found — creating"
             az containerapp create \
@@ -274,7 +276,7 @@ jobs:
               --target-port 8080 \
               --ingress external \
               --min-replicas 0 \
-              --max-replicas 10 \
+              --max-replicas 1 \
               --cpu 4.0 --memory 8.0Gi \
               --secrets "${SECRETS_ARGS[@]}" \
               --env-vars "${ENV_ARGS[@]}"
