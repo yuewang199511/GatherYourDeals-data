@@ -208,20 +208,19 @@ jobs:
 
           if [ -n "$PG_PRIVATE_IP" ]; then
             echo "Resolved PostgreSQL private IP: $PG_PRIVATE_IP"
-            # Replace hostname in DSN with private IP and force sslmode=require
-            # (sslmode=verify-full would fail with an IP address instead of hostname)
-            AZ_DATABASE_URL=$(python3 -c "
-import sys, re, urllib.parse
-dsn = sys.argv[1]
-ip  = sys.argv[2]
-# Replace host in the DSN and override sslmode to require (IP has no matching cert CN)
-dsn = re.sub(r'@[^/:@]+', '@' + ip, dsn)
-dsn = re.sub(r'sslmode=[^&?]*', 'sslmode=require', dsn)
-if 'sslmode=' not in dsn:
-    sep = '&' if '?' in dsn else '?'
-    dsn += sep + 'sslmode=require'
-print(dsn)
-" "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" "$PG_PRIVATE_IP")
+            # Replace hostname with IP in DSN. Pattern @[^/:?@]* captures the host
+            # between @ and the next port separator, path, or query char.
+            # sslmode=require forced — TLS cert CN won't match an IP address.
+            AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
+              sed "s|@[^/:?@]*|@${PG_PRIVATE_IP}|" | \
+              sed 's/sslmode=[^&? ]*/sslmode=require/')
+            if ! echo "$AZ_DATABASE_URL" | grep -q 'sslmode='; then
+              if echo "$AZ_DATABASE_URL" | grep -q '?'; then
+                AZ_DATABASE_URL="${AZ_DATABASE_URL}&sslmode=require"
+              else
+                AZ_DATABASE_URL="${AZ_DATABASE_URL}?sslmode=require"
+              fi
+            fi
           else
             echo "WARNING: Could not resolve PostgreSQL private IP — falling back to private hostname"
             AZ_DATABASE_URL=$(echo "${{ secrets.AZURE_PG_DSN_PERSISTENT }}" | \
