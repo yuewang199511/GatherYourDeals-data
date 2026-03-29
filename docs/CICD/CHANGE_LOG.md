@@ -15,3 +15,7 @@ Design decisions and significant infrastructure changes. Routine report addition
 | 2026-03-28 | #89 | Added pre-merge branch sync check rule to CLAUDE.md | Prevent merging stale branches; enforces `git fetch + git log HEAD..origin/<base>` before every merge |
 | 2026-03-28 | #91 | Subagents made read-only; only master agent writes/commits/pushes | Prevent concurrent file mutations from multiple agents; single write path simplifies audit trail |
 | 2026-03-28 | #93 | Added multi-agent fix coordination rules | Define conflict detection, one-fix-at-a-time sequencing, and priority order for simultaneous subagent reports |
+| 2026-03-28 | — | Switched Azure PostgreSQL to persistent VNet-private instance | Eliminate 8-15 min provisioning wait per CI run; ~$19/mo persistent cost vs repeated wait |
+| 2026-03-28 | — | Added Container Apps VNet integration | Container Apps must reach private PostgreSQL via gyd-vnet; subnet-apps delegated to Microsoft.App/environments |
+| 2026-03-28 | — | Replaced direct psql DB reset with Container App Job | CI runner cannot reach VNet-private PostgreSQL; job runs inside VNet instead |
+| 2026-03-28 | — | Updated Container App CPU/memory to 4.0 vCPU / 8.0 Gi | Approximate Railway's 8 vCPU / 8 GB resource limit (Consumption plan max is 4 vCPU) |

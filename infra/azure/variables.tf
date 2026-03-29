@@ -4,8 +4,13 @@ variable "run_id" {
 }
 
 variable "location" {
-  description = "Azure region for all resources"
+  description = "Azure region for all ephemeral resources — must match gyd-persistent region"
   type        = string
-  default     = "eastus2"
+  default     = "westus"
 }
 
+variable "apps_subnet_id" {
+  description = "Resource ID of subnet-apps in gyd-vnet (delegated to Microsoft.App/environments). Set via TF_VAR_apps_subnet_id in CI."
+  type        = string
+  # Format: /subscriptions/<SUB>/resourceGroups/gyd-persistent/providers/Microsoft.Network/virtualNetworks/gyd-vnet/subnets/subnet-apps
+}
