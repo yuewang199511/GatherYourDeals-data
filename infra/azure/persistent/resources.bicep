@@ -161,7 +161,7 @@ resource pgbouncer 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'pgbouncer'
-          image: 'edoburu/pgbouncer:1.23.1'
+          image: 'edoburu/pgbouncer:v1.23.1-p3'
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
