@@ -195,6 +195,8 @@ jobs:
             GYD_DATABASE_DRIVER=postgres
             "GYD_ADMIN_USERNAME=${{ secrets.GYD_ADMIN_USERNAME }}"
             OTEL_SERVICE_NAME=gatheryourdeals
+            "OTEL_RESOURCE_ATTRIBUTES=service.environment=load-test,platform.name=azure,db.type=postgres"
+            OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
             DATABASE_URL=secretref:database-url
             GYD_ADMIN_PASSWORD=secretref:gyd-admin-password
             GYD_JWT_SECRET=secretref:gyd-jwt-secret
