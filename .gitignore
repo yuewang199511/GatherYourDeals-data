@@ -41,6 +41,16 @@ load_testing/.env
 # build
 /gatheryourdeals
 
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+*.tfvars.json
+crash.log
+override.tf
+override.tf.json
+
 # LLM settings
 .claude/
 .specify/
