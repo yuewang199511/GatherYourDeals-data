@@ -381,6 +381,8 @@ jobs:
           GYD_TARGET_URL: ${{ env.LOAD_TEST_URL }}
           GYD_ADMIN_USERNAME: ${{ secrets.GYD_ADMIN_USERNAME }}
           GYD_ADMIN_PASSWORD: ${{ secrets.GYD_ADMIN_PASSWORD }}
+          GYD_TEST_USERNAME: ${{ secrets.GYD_TEST_USERNAME }}
+          GYD_TEST_PASSWORD: ${{ secrets.GYD_TEST_PASSWORD }}
         run: |
           # PostgreSQL is VNet-private — CI cannot connect directly for a TRUNCATE.
           # seed.py is idempotent: 409 on duplicate user is handled gracefully.
