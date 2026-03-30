@@ -238,17 +238,37 @@ jobs:
             --query "passwords[0].value" -o tsv)
           IMAGE="${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}"
 
+          # Delete stale gyd-lt if it exists in a different environment.
+          # The VNet-based architecture used a Dedicated plan env; the new architecture
+          # uses a Consumption plan env (gyd-lt-env). A stale app from the old env blocks
+          # creation in the correct env and cannot be updated to Consumption plan limits.
           if az containerapp show \
               --name gyd-lt \
               --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "Container App exists — updating app-database-url secret"
-            # Update DSN each run (PG_PRIVATE_IP may change if resources are recreated)
-            az containerapp secret set \
+            CURRENT_ENV_ID=$(az containerapp show \
               --name gyd-lt \
               --resource-group gyd-persistent \
-              --secrets "app-database-url=${APP_DSN}"
-          else
-            echo "Container App not found — creating"
+              --query "properties.managedEnvironmentId" -o tsv)
+            TARGET_ENV_ID=$(az containerapp env show \
+              --name gyd-lt-env \
+              --resource-group gyd-persistent \
+              --query "id" -o tsv)
+            if [ "${CURRENT_ENV_ID}" != "${TARGET_ENV_ID}" ]; then
+              echo "gyd-lt is in wrong environment — deleting stale deployment"
+              az containerapp delete \
+                --name gyd-lt \
+                --resource-group gyd-persistent \
+                --yes
+            fi
+          fi
+
+          # Create (or recreate) gyd-lt in gyd-lt-env.
+          # Consumption plan limits: max 2.0 vCPU / 4.0Gi per container.
+          # 2 replicas × 2.0 vCPU = 4.0 vCPU total.
+          if ! az containerapp show \
+              --name gyd-lt \
+              --resource-group gyd-persistent &>/dev/null 2>&1; then
+            echo "Creating gyd-lt in gyd-lt-env"
             SECRETS_ARGS=(
               "app-database-url=${APP_DSN}"
               "gyd-admin-password=${GYD_ADMIN_PASSWORD_SECRET}"
@@ -281,41 +301,28 @@ jobs:
               --transport http \
               --min-replicas 0 \
               --max-replicas 2 \
-              --cpu 4.0 \
-              --memory 8.0Gi \
+              --cpu 2.0 \
+              --memory 4.0Gi \
               --scale-rule-name "cpu-scaling" \
               --scale-rule-type "cpu" \
               --scale-rule-metadata "type=Utilization" "value=70" \
               --secrets "${SECRETS_ARGS[@]}" \
               --env-vars "${ENV_VARS_ARGS[@]}"
+          else
+            echo "gyd-lt exists in correct environment — updating image and DSN"
+            az containerapp secret set \
+              --name gyd-lt \
+              --resource-group gyd-persistent \
+              --secrets "app-database-url=${APP_DSN}"
+            az containerapp update \
+              --name gyd-lt \
+              --resource-group gyd-persistent \
+              --image "${IMAGE}" \
+              --cpu 2.0 \
+              --memory 4.0Gi \
+              --min-replicas 0 \
+              --max-replicas 2
           fi
-
-          # Always: update image, resources, and scale settings.
-          # App connects to pgBouncer (internal) which proxies to PostgreSQL (public FQDN).
-          # 2 replicas × 4.0 vCPU = 8 vCPU total, matching Railway node resources.
-          # CPU scale-out at 70% utilization.
-          # Note: using CLI flags instead of --yaml to avoid heredoc YAML parse errors in GHA.
-          az containerapp update \
-            --name gyd-lt \
-            --resource-group gyd-persistent \
-            --image "${IMAGE}" \
-            --cpu 4.0 \
-            --memory 8.0Gi \
-            --min-replicas 0 \
-            --max-replicas 2 \
-            --scale-rule-name "cpu-scaling" \
-            --scale-rule-type "cpu" \
-            --scale-rule-metadata "type=Utilization" "value=70" \
-            --set-env-vars \
-              "GYD_DATABASE_DRIVER=postgres" \
-              "DATABASE_URL=secretref:app-database-url" \
-              "GYD_ADMIN_USERNAME=${GYD_ADMIN_USERNAME_VAL}" \
-              "GYD_ADMIN_PASSWORD=secretref:gyd-admin-password" \
-              "GYD_JWT_SECRET=secretref:gyd-jwt-secret" \
-              "OTEL_SERVICE_NAME=gatheryourdeals" \
-              "OTEL_RESOURCE_ATTRIBUTES=service.environment=load-test,platform.name=azure,db.type=postgres" \
-              "OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io" \
-              "OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers"
 
           APP_FQDN=$(az containerapp show \
             --name gyd-lt \
