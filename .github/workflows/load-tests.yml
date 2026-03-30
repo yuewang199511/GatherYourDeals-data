@@ -147,6 +147,7 @@ jobs:
           AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
         run: |
           go install github.com/pressly/goose/v3/cmd/goose@latest
+          export PATH="$(go env GOPATH)/bin:$PATH"
           goose -dir internal/repository/postgres/migrations \
             postgres "$AZURE_PG_DSN" up
 
