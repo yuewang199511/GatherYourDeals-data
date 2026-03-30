@@ -8,12 +8,16 @@ jobs:
   check-source-branch:
     runs-on: ubuntu-latest
     steps:
-      - name: Require source branch to be develop
+      - name: Require source branch to be develop or docs/*
         run: |
           SOURCE="${{ github.head_ref }}"
-          if [ "$SOURCE" != "develop" ]; then
-            echo "ERROR: Pull requests to main must come from 'develop', not '$SOURCE'."
-            echo "Merge your changes into develop first, then open a PR from develop → main."
+          if [ "$SOURCE" = "develop" ]; then
+            echo "Source branch is 'develop'. OK."
+          elif [[ "$SOURCE" == docs/* ]]; then
+            echo "Source branch is a docs branch ('$SOURCE'). OK."
+          else
+            echo "ERROR: Pull requests to main must come from 'develop' or a 'docs/*' branch, not '$SOURCE'."
+            echo "For code changes: merge into develop first, then open a PR from develop → main."
+            echo "For docs-only changes: use a 'docs/<name>' branch and PR directly to main."
             exit 1
           fi
-          echo "Source branch is 'develop'. OK."
