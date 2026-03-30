@@ -299,7 +299,7 @@ jobs:
               --target-port 8080 \
               --ingress external \
               --transport http \
-              --min-replicas 0 \
+              --min-replicas 1 \
               --max-replicas 2 \
               --cpu 2.0 \
               --memory 4.0Gi \
@@ -320,7 +320,7 @@ jobs:
               --image "${IMAGE}" \
               --cpu 2.0 \
               --memory 4.0Gi \
-              --min-replicas 0 \
+              --min-replicas 1 \
               --max-replicas 2
           fi
 
@@ -335,8 +335,8 @@ jobs:
       - name: Wait for load-test service to be healthy
         run: |
           echo "Polling $LOAD_TEST_URL/health ..."
-          curl --retry 9 --retry-delay 10 --retry-connrefused --retry-all-errors \
-               --retry-max-time 90 -sf "$LOAD_TEST_URL/health"
+          curl --retry 30 --retry-delay 10 --retry-connrefused --retry-all-errors \
+               --retry-max-time 300 -sf "$LOAD_TEST_URL/health"
 
       # ── Azure: capture logs if health check fails ─────────────────────────────
       - name: Capture Container App logs (on failure)
