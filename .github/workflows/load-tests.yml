@@ -174,56 +174,18 @@ jobs:
             -t "${ACR_LOGIN_SERVER}/gatheryourdeals:${{ github.sha }}" \
             -f Dockerfile .
 
-      - name: Deploy pgBouncer Container App (Azure)
+      - name: Set direct PostgreSQL DSN for app (Azure)
         if: inputs.provider == 'azure'
         env:
           AZURE_PG_DSN: ${{ secrets.AZURE_PG_DSN_PERSISTENT }}
         run: |
-          PG_USER=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.username)")
-          PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
-
-          if az containerapp show --name gyd-pgbouncer --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "gyd-pgbouncer exists — updating password secret"
-            az containerapp secret set \
-              --name gyd-pgbouncer \
-              --resource-group gyd-persistent \
-              --secrets "pg-password=${PG_PASS}"
-          else
-            echo "Creating gyd-pgbouncer"
-            az containerapp create \
-              --name gyd-pgbouncer \
-              --resource-group gyd-persistent \
-              --environment gyd-lt-env \
-              --image edoburu/pgbouncer:latest \
-              --ingress internal \
-              --target-port 5432 \
-              --min-replicas 1 \
-              --max-replicas 1 \
-              --cpu 0.25 \
-              --memory 0.5Gi \
-              --secrets "pg-password=${PG_PASS}" \
-              --env-vars \
-                "DB_HOST=${PG_FQDN}" \
-                "DB_PORT=5432" \
-                "DB_USER=${PG_USER}" \
-                "DB_PASSWORD=secretref:pg-password" \
-                "DB_NAME=gatheryourdeals" \
-                "POOL_MODE=session" \
-                "MAX_CLIENT_CONN=100" \
-                "DEFAULT_POOL_SIZE=20" \
-                "SERVER_TLS_SSLMODE=require" \
-                "AUTH_TYPE=trust"
-          fi
-
-          # Internal FQDN: reachable only within the Container Apps Environment.
-          ENV_DOMAIN=$(az containerapp env show \
-            --name gyd-lt-env \
-            --resource-group gyd-persistent \
-            --query properties.defaultDomain -o tsv)
-          PGBOUNCER_HOST="gyd-pgbouncer.internal.${ENV_DOMAIN}"
-          PG_PASS_ENC=$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "${PG_PASS}")
-          APP_DSN="postgres://${PG_USER}:${PG_PASS_ENC}@${PGBOUNCER_HOST}:5432/gatheryourdeals?sslmode=disable"
-          echo "APP_DSN=${APP_DSN}" >> $GITHUB_ENV
+          # Connect the service directly to PostgreSQL (no pgBouncer proxy).
+          # pgBouncer in a Consumption plan Container App cannot reach the PostgreSQL
+          # server (network path blocked by Azure firewall between Consumption env
+          # and the DB). The GHA runner can connect fine because it uses public IPs
+          # that are on the DB's allow-list. Bypassing pgBouncer removes that
+          # dependency and lets the service use the same DSN that goose uses.
+          echo "APP_DSN=${AZURE_PG_DSN}" >> $GITHUB_ENV
 
       - name: Deploy gyd-lt to Azure Container Apps
         if: inputs.provider == 'azure'
