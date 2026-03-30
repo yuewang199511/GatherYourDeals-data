@@ -293,49 +293,28 @@ jobs:
           # App connects to pgBouncer (internal) which proxies to PostgreSQL (public FQDN).
           # 2 replicas × 4.0 vCPU = 8 vCPU total, matching Railway node resources.
           # CPU scale-out at 70% utilization.
-          cat > /tmp/gyd-lt-update.yaml << YAML
-properties:
-  template:
-    containers:
-      - name: gatheryourdeals
-        image: ${IMAGE}
-        resources:
-          cpu: 4.0
-          memory: 8.0Gi
-        env:
-          - name: GYD_DATABASE_DRIVER
-            value: postgres
-          - name: DATABASE_URL
-            secretRef: app-database-url
-          - name: GYD_ADMIN_USERNAME
-            value: ${GYD_ADMIN_USERNAME_VAL}
-          - name: GYD_ADMIN_PASSWORD
-            secretRef: gyd-admin-password
-          - name: GYD_JWT_SECRET
-            secretRef: gyd-jwt-secret
-          - name: OTEL_SERVICE_NAME
-            value: gatheryourdeals
-          - name: OTEL_RESOURCE_ATTRIBUTES
-            value: service.environment=load-test,platform.name=azure,db.type=postgres
-          - name: OTEL_EXPORTER_OTLP_ENDPOINT
-            value: https://api.honeycomb.io
-          - name: OTEL_EXPORTER_OTLP_HEADERS
-            secretRef: otel-headers
-    scale:
-      minReplicas: 0
-      maxReplicas: 2
-      rules:
-        - name: cpu-scaling
-          custom:
-            type: cpu
-            metadata:
-              type: Utilization
-              value: "70"
-YAML
+          # Note: using CLI flags instead of --yaml to avoid heredoc YAML parse errors in GHA.
           az containerapp update \
             --name gyd-lt \
             --resource-group gyd-persistent \
-            --yaml /tmp/gyd-lt-update.yaml
+            --image "${IMAGE}" \
+            --cpu 4.0 \
+            --memory 8.0Gi \
+            --min-replicas 0 \
+            --max-replicas 2 \
+            --scale-rule-name "cpu-scaling" \
+            --scale-rule-type "cpu" \
+            --scale-rule-metadata "type=Utilization" "value=70" \
+            --set-env-vars \
+              "GYD_DATABASE_DRIVER=postgres" \
+              "DATABASE_URL=secretref:app-database-url" \
+              "GYD_ADMIN_USERNAME=${GYD_ADMIN_USERNAME_VAL}" \
+              "GYD_ADMIN_PASSWORD=secretref:gyd-admin-password" \
+              "GYD_JWT_SECRET=secretref:gyd-jwt-secret" \
+              "OTEL_SERVICE_NAME=gatheryourdeals" \
+              "OTEL_RESOURCE_ATTRIBUTES=service.environment=load-test,platform.name=azure,db.type=postgres" \
+              "OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io" \
+              "OTEL_EXPORTER_OTLP_HEADERS=secretref:otel-headers"
 
           APP_FQDN=$(az containerapp show \
             --name gyd-lt \
