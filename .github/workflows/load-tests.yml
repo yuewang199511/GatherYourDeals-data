@@ -141,6 +141,28 @@ jobs:
             --query fullyQualifiedDomainName -o tsv)
           echo "PG_FQDN=${PG_FQDN}" >> $GITHUB_ENV
 
+      - name: Allow Azure services to reach PostgreSQL (Azure)
+        if: inputs.provider == 'azure'
+        run: |
+          # 0.0.0.0/0.0.0.0 is Azure's special firewall rule meaning
+          # "allow connections from all Azure services and resources".
+          # Container Apps (Consumption plan) need this to reach the DB;
+          # without it only explicitly allowlisted IPs (e.g. GHA runner) can connect.
+          if ! az postgres flexible-server firewall-rule show \
+              --name gyd-pg-main \
+              --resource-group gyd-persistent \
+              --rule-name AllowAllAzureIps &>/dev/null 2>&1; then
+            echo "Creating AllowAllAzureIps firewall rule"
+            az postgres flexible-server firewall-rule create \
+              --name gyd-pg-main \
+              --resource-group gyd-persistent \
+              --rule-name AllowAllAzureIps \
+              --start-ip-address 0.0.0.0 \
+              --end-ip-address 0.0.0.0
+          else
+            echo "AllowAllAzureIps firewall rule already exists"
+          fi
+
       - name: Run database migrations (Azure)
         if: inputs.provider == 'azure'
         env:
@@ -183,11 +205,19 @@ jobs:
           PG_PASS=$(python3 -c "import os,urllib.parse; u=urllib.parse.urlparse(os.environ['AZURE_PG_DSN']); print(u.password)")
 
           if az containerapp show --name gyd-pgbouncer --resource-group gyd-persistent &>/dev/null 2>&1; then
-            echo "gyd-pgbouncer exists — updating password secret"
+            echo "gyd-pgbouncer exists — updating password secret and restarting"
             az containerapp secret set \
               --name gyd-pgbouncer \
               --resource-group gyd-persistent \
               --secrets "pg-password=${PG_PASS}"
+            # Restart so the new secret takes effect
+            az containerapp revision restart \
+              --name gyd-pgbouncer \
+              --resource-group gyd-persistent \
+              --revision "$(az containerapp revision list \
+                --name gyd-pgbouncer \
+                --resource-group gyd-persistent \
+                --query "[?properties.active].name" -o tsv | head -1)"
           else
             echo "Creating gyd-pgbouncer"
             az containerapp create \
