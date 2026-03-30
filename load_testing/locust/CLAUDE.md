@@ -15,29 +15,7 @@ docs/testing
 
 # Honeycomb Setup
 
-Before querying Honeycomb, verify both keys are present:
-
-1. Root `.env` — for trace correlation:
-```
-OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<your-ingest-key>
-```
-
-2. `load_testing/.env` — for load test events:
-```
-HONEYCOMB_API_KEY=<your-api-key>
-```
-
-If either key is blank or missing, stop and notify the user before proceeding with any Honeycomb queries or event posting.
-
-If both keys are present, install and authenticate the skill:
-
-```
-claude plugin marketplace add honeycombio/agent-skill
-claude plugin install honeycomb
-/honeycomb-setup
-```
-
-Run `/honeycomb-setup` once per session.
+Honeycomb is configured at the session level by the master agent. Before running any Honeycomb queries, verify all three prerequisites in the root `CLAUDE.md` Tracing Prerequisites section are met. Do not attempt to configure Honeycomb yourself.
 
 # Tasks
 
@@ -72,12 +50,12 @@ Under `### Extension` include:
 
 ---
 
-## load testing monitoring with few tokens
+## Load Testing Monitoring with Few Tokens
 
 Please save tokens by following these guidelines when performing load testing:
 1. only look at the failure records, you can even only check the records after the experiment finished rather than always follow it
 
-## python running guidelines
+## Python Running Guidelines
 1. use venv for activating the environment
 
 ## Regression Cases
@@ -90,7 +68,7 @@ Before concluding a load test run is healthy, check all regression cases in [`do
 
 If any regression case matches the current results, treat it as a test failure — stop and escalate to the user.
 
-## load testing workflow
+## Load Testing Workflow
 
 Always use `docker compose` to run the service for load testing. Never use the local binary.
 

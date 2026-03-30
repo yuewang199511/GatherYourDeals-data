@@ -15,23 +15,7 @@ docs/testing
 
 # Honeycomb Setup
 
-Before querying Honeycomb traces, verify the ingest key is present in the root `.env` file:
-
-```
-OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<your-ingest-key>
-```
-
-If `OTEL_EXPORTER_OTLP_HEADERS` is blank or missing, stop and notify the user — Honeycomb tracing is not configured and trace queries will fail.
-
-If the key is present, install and authenticate the skill:
-
-```
-claude plugin marketplace add honeycombio/agent-skill
-claude plugin install honeycomb
-/honeycomb-setup
-```
-
-Run `/honeycomb-setup` once per session.
+Honeycomb is configured at the session level by the master agent. Before running any Honeycomb queries, verify all three prerequisites in the root `CLAUDE.md` Tracing Prerequisites section are met. Do not attempt to configure Honeycomb yourself.
 
 # Environment
 
