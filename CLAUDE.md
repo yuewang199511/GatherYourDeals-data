@@ -1,21 +1,13 @@
 # GatherYourDeals-data Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-03-22
-
 ## Active Technologies
-- Go 1.25.7 + Gin (HTTP), `database/sql` (DB abstraction), Goose v3 (migrations — not used by this feature), `mattn/go-sqlite3` (SQLite), `pgx/v5` (PostgreSQL) (002-api-list-pagination)
-- SQLite (primary) + PostgreSQL (feature 001); both must be updated identically in behaviour (002-api-list-pagination)
-- Go 1.25.7 (service); Python 3.11 + Locust 2.32 (load testing) (004-add-otel-honeycomb)
-- SQLite (primary) + PostgreSQL; both instrumented via `otelsql` driver wrapper (004-add-otel-honeycomb)
-- Python 3.11 + `locustio/locust:2.32.0`, `requests` (HTTP), `concurrent.futures` (stdlib) (005-fix-logout-group-pool)
-- N/A — in-process `queue.Queue` only; results written to `load_testing/results/` (existing) (005-fix-logout-group-pool)
-- Python 3.11 (integration tests); Go 1.25 (service under test — unchanged) + `pytest>=8.0`, `requests>=2.31`, `python-dotenv==1.0.1` (all in venv) (006-integration-tests)
-- SQLite (default local) or PostgreSQL — no changes; tests hit the live DB via HTTP (006-integration-tests)
-- Python 3.11 (integration tests); Bash (runner scripts) + pytest ≥ 8.0, requests ≥ 2.31, python-dotenv 1.0.1 — all already in `load_testing/.venv`; no new dependencies required (007-seed-guardrail-tests)
-- N/A — guardrail is read-only against the live service (007-seed-guardrail-tests)
 
-- Go 1.25 (as declared in `go.mod`) + Gin (HTTP), Cobra (CLI), Goose v3 (migrations), `database/sql` (DB abstraction); adding `pgx/v5` (PostgreSQL driver, pure Go) (001-add-postgres-support)
-- Python 3.11 + Locust 2.32 (headless load testing); Docker Compose; Bash runner scripts; `load_testing/` directory (003-load-testing-env-config)
+- **Go 1.25** + Gin (HTTP), Cobra (CLI), `database/sql`, Goose v3 (migrations)
+- **SQLite** (`mattn/go-sqlite3`) — local development only
+- **PostgreSQL** (`pgx/v5`) — production target; both backends instrumented via `otelsql`
+- **Python 3.11** + Locust 2.32 (load testing), pytest ≥ 8.0, requests ≥ 2.31, python-dotenv 1.0.1 (integration/guardrail tests)
+
+Feature-level technology decisions are in `specs/`.
 
 ## Project Structure
 
@@ -25,13 +17,7 @@ Please refer to [docs/service_structure.md](docs/service_structure.md)
 
 Go 1.25 (as declared in `go.mod`): Code must pass `gofmt` and `golangci-lint` (config: `.golangci.yml`). Both run in CI via `.github/workflows/code-quality.yml` and are the authoritative style gate.
 
-## Recent Changes
-- 007-seed-guardrail-tests: Added Python 3.11 (integration tests); Bash (runner scripts) + pytest ≥ 8.0, requests ≥ 2.31, python-dotenv 1.0.1 — all already in `load_testing/.venv`; no new dependencies required
-- 006-integration-tests: Added Python 3.11 (integration tests); Go 1.25 (service under test — unchanged) + `pytest>=8.0`, `requests>=2.31`, `python-dotenv==1.0.1` (all in venv)
-- 005-fix-logout-group-pool: Added Python 3.11 + `locustio/locust:2.32.0`, `requests` (HTTP), `concurrent.futures` (stdlib)
 
-
-<!-- MANUAL ADDITIONS START -->
 ## Actual Project Structure
 
 ```text
@@ -109,15 +95,18 @@ Please also revisit the README.md and verify that every command documented there
 
 If you receive any request that needs to start those subagents defined in this repo, let the user know.
 
-# environment prerequisites
+# CLI Prerequisites
 
-At the start of any task, verify the following required CLI tools are installed by running `which <tool>` for each:
-- `docker`
-- `gh`
-- `jq`
-- `railway`
+At the start of any task, verify these tools are installed (`which <tool>`):
+- `docker`, `gh`, `jq`, `railway`
 
-If any are missing, stop immediately and tell the user the exact install command. Do not proceed until all four are available.
+If any are missing:
+1. Stop immediately
+2. Tell the user the exact install command, e.g.:
+   > `gh` is not installed. Run: `! sudo apt install gh` then `! gh auth login`
+3. Wait for the user to install it — do not fall back to alternatives
+
+Once installed via `! <command>` in the same session, resume immediately.
 
 # Tracing Prerequisites
 
@@ -156,6 +145,10 @@ To prevent agents from consuming excessive tokens on dead or failing external ca
 - If a tool or endpoint is unavailable, treat it as a blocked state and follow the Stop / Blocked rule below
 
 This applies to all agents and subagents.
+
+## Network Timeout Diagnosis
+
+On any timeout, run the diagnosis ladder before retrying or assuming root cause — see `docs/operations/network_diagnosis.md`. Platform tools: Railway (`list-deployments`, `get-logs`), Azure (`az postgres flexible-server show`), AWS (`aws rds describe-db-instances`).
 
 # Multi-Agent Fix Coordination
 
@@ -200,13 +193,7 @@ If two agents diagnose the same symptom differently, do not pick one arbitrarily
 
 ---
 
-# Autonomy Boundary Map
-
-These rules govern how much agents can act independently versus when they must stop and involve the user.
-
-# IMPORTANT FOR GIT
-
-PLEASE ALWAYS CHECK IF BRANCH IS UP TO DATE WITH TARGET IF YOU HAVE A PR!!!
+# Git Rules
 
 ## Merge strategy
 
@@ -214,8 +201,25 @@ PLEASE ALWAYS CHECK IF BRANCH IS UP TO DATE WITH TARGET IF YOU HAVE A PR!!!
 |---|---|---|---|
 | feature branch → `develop` | Squash | `--squash` | Collapses noisy work-in-progress commits into one clean entry |
 | `develop` → `main` | Merge commit | `--merge` | Preserves shared commit lineage so future develop→main PRs are always clean; squashing here creates diverged histories that cause conflicts |
+| `docs/*` branch → `main` | Squash | `--squash` | Docs-only changes skip CI (paths-ignore) and go directly to main without staging on develop |
 
 Never use `--squash` for `develop` → `main`.
+
+## docs/* branches — direct to main
+
+Docs-only changes (`docs/**`, `specs/**`, `*.md`, `**/CLAUDE.md`) use a `docs/<name>` branch and PR **directly to `main`** — they do not go through `develop`.
+
+CI workflows have `paths-ignore` for these paths so the heavy checks are skipped and the PR merges immediately.
+
+**What counts as docs-only:** anything under `docs/`, `specs/`, any `*.md` file, any `CLAUDE.md`.
+**What does not qualify:** changes to `internal/`, `cmd/`, `load_testing/*.py`, `.github/workflows/`, `go.mod`, `Dockerfile` — these must go through `develop`.
+
+## develop → main — batch, don't promote every change
+
+Do not open a `develop` → `main` PR after every individual feature. Batch multiple features together into one promotion. A good trigger for promoting:
+- After a load test run produces a clean report
+- After 2–3 features have accumulated on `develop`
+- Before a planned release or deployment
 
 ## Pre-merge branch sync check
 
@@ -270,20 +274,6 @@ Each agent's CLAUDE.md defines its own extension fields.
 
 After completing any code changes, the implementing subagent must run `/simplify` on its own changes before reporting back to the master agent. The master agent does not run `/simplify` itself.
 
-# permision
+# Permission
 
-if you need sudo permission, please ask me
-
-# Missing CLI Tools
-
-If a required CLI tool is not installed (e.g. `gh`, `docker`, `jq`), do not silently fall back to an alternative approach. Instead:
-
-1. Stop immediately
-2. Tell the user exactly what is missing and the install command, e.g.:
-   > `gh` is not installed. Run: `! sudo apt install gh` then `! gh auth login`
-3. Wait for the user to install it
-
-Once the user installs the tool in the same session (using `! <command>`), it activates immediately — no restart needed. Resume from where you stopped.
-
-
-<!-- MANUAL ADDITIONS END -->
+If you need sudo, ask first.
