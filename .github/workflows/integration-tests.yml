@@ -23,7 +23,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD \
-               | grep -qvE '^(docs/|specs/|.*\.md$)'; then
+               | grep -qvE '^(docs/|specs/|\.github/|.*\.md$)'; then
             echo "src=true" >> "$GITHUB_OUTPUT"
           else
             echo "src=false" >> "$GITHUB_OUTPUT"
