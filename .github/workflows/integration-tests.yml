@@ -2,27 +2,31 @@ name: Integration Tests
 
 on:
   pull_request:
-    branches: [ develop ]
-    paths-ignore:
-      - 'docs/**'
-      - 'specs/**'
-      - '**.md'
+    # Trigger on PRs to both develop and main so the `integration` required
+    # status check is always reported — even for docs-only PRs to main.
+    # The changes job below skips the actual work when no source files changed.
+    branches: [ develop, main ]
   push:
+    # Push to develop (e.g. after a PR merge) — changes job always returns
+    # src=true for push events, so integration runs on every code push.
     branches: [ develop ]
-    paths-ignore:
-      - 'docs/**'
-      - 'specs/**'
-      - '**.md'
 
 jobs:
+  changes:
+    uses: ./.github/workflows/detect-source-changes.yml
+
   integration:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     # All runs share the load-test Railway environment — serialize to prevent
     # concurrent deploys and test data conflicts.
+    # NOTE: must match the Railway load-test concurrency group in load-tests.yml
+    # so integration tests and load tests can never overlap and corrupt the shared DB.
     concurrency:
-      group: load-test-env
+      group: railway-load-test-env
       cancel-in-progress: false
 
     steps:

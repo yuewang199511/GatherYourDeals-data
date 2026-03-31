@@ -47,8 +47,10 @@ jobs:
     # Serialize per provider — both Railway and Azure load tests share the same
     # environment resources (PostgreSQL, replicas). Parallel runs would corrupt data
     # and hit connection limits. workflow_dispatch is manual so pile-ups are rare.
+    # NOTE: Railway load tests use the same group as integration-tests.yml so they
+    # can never overlap and corrupt the shared load-test DB mid-run.
     concurrency:
-      group: ${{ inputs.provider }}-load-test
+      group: ${{ inputs.provider == 'railway' && 'railway-load-test-env' || 'azure-load-test' }}
       cancel-in-progress: false
 
     steps:
