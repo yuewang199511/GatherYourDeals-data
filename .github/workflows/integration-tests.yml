@@ -21,8 +21,10 @@ jobs:
 
     # All runs share the load-test Railway environment — serialize to prevent
     # concurrent deploys and test data conflicts.
+    # NOTE: must match the Railway load-test concurrency group in load-tests.yml
+    # so integration tests and load tests can never overlap and corrupt the shared DB.
     concurrency:
-      group: load-test-env
+      group: railway-load-test-env
       cancel-in-progress: false
 
     steps:
