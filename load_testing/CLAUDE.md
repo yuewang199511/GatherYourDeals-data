@@ -38,13 +38,9 @@ When seeding against a remote provider (Railway, Azure), the correct fix for see
 | `ReadTimeout` during seeding | Increase `GYD_SEED_TIMEOUT` | Reduce `GYD_SEED_WORKERS` |
 | Seed completes but slow | Increase workers | Acceptable — seed is pre-test only |
 
-**Why:** Remote services have CPU/connection limits. High concurrency (10 workers default) can saturate a single-instance Railway service or exhaust PostgreSQL connections. 3 workers is the validated safe value for Railway hobby/single-instance.
+**Why:** Remote services have CPU/connection limits. High concurrency can saturate a single-instance service or exhaust PostgreSQL connections.
 
-Increasing timeout alone does not fix the root cause (CPU saturation) — it just makes each timed-out request wait longer before failing.
-
-**Configured values for Railway CI:** `GYD_SEED_WORKERS=10`, `GYD_SEED_TIMEOUT=40` (set in workflow env).
-
-The 3-worker value was a temporary conservative fix while parallel runs were causing resource contention. Once concurrency was serialized per provider, 10 workers is safe. 40s covers Railway's bcrypt login spike (~11s avg moderate, up to ~16s under light load) with headroom.
+**Validated values for Railway CI:** `GYD_SEED_WORKERS=10`, `GYD_SEED_TIMEOUT=40`
 
 # Test Execution Order
 
@@ -61,7 +57,7 @@ If integration tests fail, stop and report to the user before proceeding to load
 3. Collect fix plans from subagents and forward them to the master agent for implementation. Subagents do not edit files.
 4. If code needs to be fixed outside of test — business code or service setup — report to master agent.
 
-# escalation rule
+# Escalation Rule
 
 In order to make testing robust and fixing solutions repeatable. 
 1. Please also ask user if fix needs to have new guardrails to prevent same testing issue happens.
