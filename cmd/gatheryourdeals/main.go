@@ -19,6 +19,7 @@ import (
 	"github.com/gatheryourdeals/data/internal/logger"
 	"github.com/gatheryourdeals/data/internal/repository"
 	"github.com/gatheryourdeals/data/internal/repository/postgres"
+	redisrepo "github.com/gatheryourdeals/data/internal/repository/redis"
 	"github.com/gatheryourdeals/data/internal/repository/sqlite"
 	"github.com/gatheryourdeals/data/internal/telemetry"
 	"github.com/spf13/cobra"
@@ -131,6 +132,20 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 			defer func() { _ = r.Close() }()
+
+			// Redis: use Redis-backed refresh token store when REDIS_URL is set.
+			// Falls back to the database store (already set in r.RefreshStore) if unset.
+			if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+				rs, err := redisrepo.New(redisURL)
+				if err != nil {
+					return fmt.Errorf("connect redis: %w", err)
+				}
+				defer func() { _ = rs.Close() }()
+				r.RefreshStore = rs
+				slog.Info("refresh tokens: using Redis")
+			} else {
+				slog.Info("refresh tokens: using database (REDIS_URL not set)")
+			}
 
 			// Logging: OTel log bridge added as second sink when configured (FR-005).
 			appLogger, err := logger.New(logger.Config{
