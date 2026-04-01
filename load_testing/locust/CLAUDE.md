@@ -70,7 +70,10 @@ If any regression case matches the current results, treat it as a test failure �
 
 ## Load Testing Workflow
 
-Always use `docker compose` to run the service for load testing. Never use the local binary.
+**Remote tests (Railway, Azure) are triggered via GitHub Actions — never run locally.**
+Use `gh workflow run load-tests.yml` (see `.github/workflows/load-tests.yml`). Do not create `load_testing/.env` or look up credentials for remote runs — CI injects them from GitHub Secrets.
+
+For local tests, always use `docker compose` to run the service. Never use the local binary.
 
 The testing master handles service startup and snapshot restore before delegating to this agent.
 Do not restart the service yourself — assume it is already running and healthy when you start.
