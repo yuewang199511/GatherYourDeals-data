@@ -50,6 +50,8 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/redis/go-redis/extra/rediscmd/v9 v9.18.0 // indirect
+	github.com/redis/go-redis/extra/redisotel/v9 v9.18.0 // indirect
 	github.com/redis/go-redis/v9 v9.18.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
