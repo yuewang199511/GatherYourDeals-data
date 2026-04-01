@@ -41,13 +41,15 @@ jobs:
         run: |
           railway up --service "GatherYourDeals-data"
 
-          # Read the domain from the Railway-injected env var — same pattern as DB_URL in the reset step.
-          if ! DOMAIN=$(railway run --service "GatherYourDeals-data" -- sh -c 'echo "https://$RAILWAY_PUBLIC_DOMAIN"'); then
-            echo "ERROR: Failed to fetch RAILWAY_PUBLIC_DOMAIN from Railway"
+          # Use if-condition to prevent set -e from silently exiting on non-zero exit code
+          if ! DOMAIN=$(railway domain -s "GatherYourDeals-data" --json 2>&1 | jq -r '.domains[0] // empty'); then
+            echo "ERROR: railway domain command failed:"
+            echo "$DOMAIN"
             exit 1
           fi
-          if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "https://" ]; then
+          if [ -z "$DOMAIN" ]; then
             echo "ERROR: Could not get domain for load-test environment."
+            railway domain -s "GatherYourDeals-data" --json 2>&1 || true
             exit 1
           fi
 
