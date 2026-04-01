@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gatheryourdeals/data/internal/model"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -27,6 +28,9 @@ func New(redisURL string) (*RefreshTokenStore, error) {
 		return nil, fmt.Errorf("parse redis URL: %w", err)
 	}
 	client := goredis.NewClient(opts)
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		return nil, fmt.Errorf("instrument redis tracing: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
