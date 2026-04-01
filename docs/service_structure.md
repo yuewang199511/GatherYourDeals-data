@@ -37,17 +37,19 @@ GatherYourDeals-data/
 │       │       ├── 00003_create_refresh_tokens_table.sql
 │       │       ├── 00004_create_meta_fields_table.sql
 │       │       └── 00005_create_receipts_table.sql
-│       └── postgres/
-│           ├── postgres.go              # PostgreSQL connection, goose migration runner
-│           ├── user.go                  # PostgreSQL implementation of UserRepository
-│           ├── refresh_token.go         # PostgreSQL implementation of auth.RefreshTokenStore
-│           ├── meta_field.go            # PostgreSQL implementation of MetaFieldRepository
-│           ├── receipt.go               # PostgreSQL implementation of ReceiptRepository
-│           └── migrations/              # PostgreSQL-compatible SQL files (embedded via go:embed)
-│               ├── 00001_create_users_table.sql
-│               ├── 00003_create_refresh_tokens_table.sql
-│               ├── 00004_create_meta_fields_table.sql
-│               └── 00005_create_receipts_table.sql
+│       ├── postgres/
+│       │   ├── postgres.go              # PostgreSQL connection, goose migration runner
+│       │   ├── user.go                  # PostgreSQL implementation of UserRepository
+│       │   ├── refresh_token.go         # PostgreSQL implementation of auth.RefreshTokenStore
+│       │   ├── meta_field.go            # PostgreSQL implementation of MetaFieldRepository
+│       │   ├── receipt.go               # PostgreSQL implementation of ReceiptRepository
+│       │   └── migrations/              # PostgreSQL-compatible SQL files (embedded via go:embed)
+│       │       ├── 00001_create_users_table.sql
+│       │       ├── 00003_create_refresh_tokens_table.sql
+│       │       ├── 00004_create_meta_fields_table.sql
+│       │       └── 00005_create_receipts_table.sql
+│       └── redis/
+│           └── refresh_token.go         # Redis implementation of auth.RefreshTokenStore
 ├── docs/
 │   ├── api.yaml                         # OpenAPI 3.0 specification
 │   ├── api_examples.md                  # curl examples for every endpoint
@@ -120,10 +122,26 @@ The replacement is direct JWT authentication:
 
 - **Login** (`POST /api/v1/auth/login`) verifies the password and returns a signed JWT access token plus a refresh token.
 - **Access tokens** are stateless JWTs verified by HMAC-SHA256 signature. No database lookup is needed per request. The user's role is embedded in the token claims.
-- **Refresh tokens** are stored in the `refresh_tokens` SQLite table for revocation support. They are rotated on every use — the old token is deleted and a new pair is issued.
-- **Logout** deletes the refresh token from the database. The access token expires naturally.
+- **Refresh tokens** are stored for revocation support and rotated on every use — the old token is deleted and a new pair is issued.
+- **Logout** deletes the refresh token. The access token expires naturally.
 
-This removes the need for Redis, OAuth2 client management, and the associated complexity.
+**Refresh token store selection** (checked at startup in `serveCmd`):
+
+| `REDIS_URL` set? | Store used | Notes |
+|:---|:---|:---|
+| Yes | `repository/redis/RefreshTokenStore` | Native TTL; supports horizontal scaling |
+| No | `repository/sqlite/` or `repository/postgres/` | Falls back to whichever DB driver is configured |
+
+**Redis key layout** (when Redis is used):
+
+| Key | Value | TTL |
+|:---|:---|:---|
+| `rt:{token}` | `userID` (string) | Token expiry duration (default 7 days) |
+| `ut:{userID}` | SET of active token strings | Extended on each new token save |
+
+- `rt:` (refresh token) is the primary lookup: given a token, find its owner in O(1).
+- `ut:` (user tokens) is a reverse index used only by `DeleteAllForUser` (triggered when a user is deleted), so all sessions across all devices are revoked atomically.
+- Expiry is enforced natively by Redis TTL — no manual cleanup queries needed.
 
 ## JWT Signing Secret
 
