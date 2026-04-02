@@ -48,6 +48,25 @@ func (s *RefreshTokenStore) Find(ctx context.Context, token string) (string, err
 	return userID, nil
 }
 
+// Consume atomically deletes the token and returns the userID in one statement.
+// If the token is missing or expired, sql.ErrNoRows maps to ErrInvalidToken.
+// Because SQLite serialises writers, the DELETE is the exclusive "claim" — a
+// concurrent call that races here will find no rows and get ErrInvalidToken.
+func (s *RefreshTokenStore) Consume(ctx context.Context, token string) (string, error) {
+	var userID string
+	err := s.db.conn.QueryRowContext(ctx,
+		`DELETE FROM refresh_tokens WHERE token = ? AND expires_at > ? RETURNING user_id`,
+		token, time.Now().Unix(),
+	).Scan(&userID)
+	if err == sql.ErrNoRows {
+		return "", model.ErrInvalidToken
+	}
+	if err != nil {
+		return "", err
+	}
+	return userID, nil
+}
+
 func (s *RefreshTokenStore) Delete(ctx context.Context, token string) error {
 	_, err := s.db.conn.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE token = ?`, token)
 	return err

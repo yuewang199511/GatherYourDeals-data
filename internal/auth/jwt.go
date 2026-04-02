@@ -37,6 +37,11 @@ type RefreshTokenStore interface {
 	// Find returns the userID for a valid, non-expired token.
 	// Returns ("", model.ErrInvalidToken) if not found or expired.
 	Find(ctx context.Context, token string) (userID string, err error)
+	// Consume atomically validates and deletes the token in a single operation.
+	// Returns the userID on success, or ErrInvalidToken if the token does not exist
+	// or was already consumed by a concurrent call. This prevents the race where two
+	// concurrent refresh requests both pass Find before either calls Delete.
+	Consume(ctx context.Context, token string) (userID string, err error)
 	// Delete revokes a refresh token (logout).
 	Delete(ctx context.Context, token string) error
 	// DeleteAllForUser revokes all refresh tokens for a user (force-logout).
@@ -82,8 +87,10 @@ func (ts *TokenService) ValidateAccessToken(tokenStr string) (*Claims, error) {
 
 // RefreshAccessToken validates a refresh token and issues a new access token.
 // The old refresh token is consumed and a new one is issued (rotation).
+// Consume is used instead of Find+Delete to prevent a race where two concurrent
+// calls both pass Find before either reaches Delete.
 func (ts *TokenService) RefreshAccessToken(ctx context.Context, refreshToken string, users UserLookup) (newAccess, newRefresh string, err error) {
-	userID, err := ts.store.Find(ctx, refreshToken)
+	userID, err := ts.store.Consume(ctx, refreshToken)
 	if err != nil {
 		return "", "", ErrInvalidToken
 	}
@@ -93,10 +100,6 @@ func (ts *TokenService) RefreshAccessToken(ctx context.Context, refreshToken str
 		return "", "", ErrInvalidToken
 	}
 
-	// Rotate: delete old token, issue new pair.
-	if err = ts.store.Delete(ctx, refreshToken); err != nil {
-		return "", "", err
-	}
 	return ts.IssueTokenPair(ctx, user)
 }
 

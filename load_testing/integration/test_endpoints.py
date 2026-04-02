@@ -129,6 +129,34 @@ def test_refresh_success(config, user_token_pair):
     assert "refresh_token" in body
 
 
+def test_refresh_concurrent_same_token(config, user_token_pair):
+    """Two simultaneous refresh requests with the same token: exactly one 200, one 401."""
+    import threading
+
+    token = user_token_pair["refresh_token"]
+    payload = {"refresh_token": token}
+    url = f"{config['base_url']}/api/v1/auth/refresh"
+
+    responses = []
+    lock = threading.Lock()
+
+    def do_refresh():
+        resp = requests.post(url, json=payload, timeout=30)
+        with lock:
+            responses.append(resp.status_code)
+
+    t1 = threading.Thread(target=do_refresh)
+    t2 = threading.Thread(target=do_refresh)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert sorted(responses) == [200, 401], (
+        f"expected [200, 401] from concurrent refresh, got {sorted(responses)}"
+    )
+
+
 def test_refresh_invalid_token(config):
     resp = requests.post(
         f"{config['base_url']}/api/v1/auth/refresh",
