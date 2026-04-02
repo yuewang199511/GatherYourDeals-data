@@ -43,6 +43,13 @@ func (db *DB) Close() error {
 	return db.conn.Close()
 }
 
+// SetMaxOpenConns forwards to the underlying sql.DB. Useful in tests that use
+// an in-memory SQLite database: :memory: is per-connection, so pinning to one
+// connection ensures all goroutines share the same database.
+func (db *DB) SetMaxOpenConns(n int) {
+	db.conn.SetMaxOpenConns(n)
+}
+
 // migrate runs all pending goose migrations from the embedded SQL files.
 // follwing example in https://github.com/pressly/goose?tab=readme-ov-file#go-migrations
 func (db *DB) migrate() error {

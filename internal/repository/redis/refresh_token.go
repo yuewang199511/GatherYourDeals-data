@@ -21,6 +21,17 @@ type RefreshTokenStore struct {
 	client *goredis.Client
 }
 
+// NewWithClient wraps an already-configured Redis client. Used in tests to
+// inject a miniredis-backed client without OTel instrumentation.
+func NewWithClient(client *goredis.Client) (*RefreshTokenStore, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+	return &RefreshTokenStore{client: client}, nil
+}
+
 // New parses the Redis URL and returns a connected RefreshTokenStore.
 func New(redisURL string) (*RefreshTokenStore, error) {
 	opts, err := goredis.ParseURL(redisURL)
@@ -66,6 +77,21 @@ func (s *RefreshTokenStore) Find(ctx context.Context, token string) (string, err
 	if err != nil {
 		return "", err
 	}
+	return userID, nil
+}
+
+// Consume atomically claims the token using GETDEL. If two goroutines race,
+// only one receives the userID — the other gets Nil and returns ErrInvalidToken.
+// SREM on the user-set is bookkeeping only; it is not security-critical.
+func (s *RefreshTokenStore) Consume(ctx context.Context, token string) (string, error) {
+	userID, err := s.client.GetDel(ctx, rtKey(token)).Result()
+	if errors.Is(err, goredis.Nil) {
+		return "", model.ErrInvalidToken
+	}
+	if err != nil {
+		return "", err
+	}
+	_ = s.client.SRem(ctx, utKey(userID), token).Err()
 	return userID, nil
 }
 
