@@ -35,17 +35,19 @@ configure_context(
 # 4 equal-weight endpoints → 4× multiplier
 GroupShape = make_shape(endpoint_multiplier=_ENDPOINTS)
 
-# Pre-fetched receipt IDs — populated once before users are spawned
+# Pre-fetched receipt IDs and shared token — populated once before users are spawned
 _receipt_ids: list[str] = []
+_shared_token: str = ""
 
 
 @events.test_start.add_listener
 def _prefetch_receipt_ids(environment, **kwargs):
-    """Fetch a page of receipt IDs using plain requests (not tracked in Locust stats)."""
-    global _receipt_ids
+    """Login once, fetch receipt IDs, and store the token for all ReadUser instances."""
+    global _receipt_ids, _shared_token
     cfg = load_config()
     try:
         pair = login(cfg["target_url"], cfg["username"], cfg["password"])
+        _shared_token = pair["access"]
         resp = _requests.get(
             f"{cfg['target_url']}/api/v1/receipts?limit=50&offset=0",
             headers={"Authorization": f"Bearer {pair['access']}"},
@@ -71,9 +73,12 @@ class ReadUser(FastHttpUser):
         cfg = load_config()
         phase = cfg["phase"]
         target_rps = cfg["rps_moderate"] if phase == "moderate" else cfg["rps_stress"]
-        pair = safe_login(self.environment, cfg["target_url"], cfg["username"], cfg["password"])
+        # Reuse the token obtained during test_start — one login for the whole group
+        token = _shared_token or safe_login(
+            self.environment, cfg["target_url"], cfg["username"], cfg["password"]
+        )["access"]
         self._headers = {
-            "Authorization": f"Bearer {pair['access']}",
+            "Authorization": f"Bearer {token}",
             "X-Test-Run-Id": TEST_RUN_ID,
             "X-Test-Group": "read_heavy",
             "X-Test-Phase": phase,

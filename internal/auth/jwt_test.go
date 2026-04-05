@@ -230,6 +230,44 @@ func TestRefreshAccessToken_OldTokenRevoked(t *testing.T) {
 	}
 }
 
+func TestRefreshAccessToken_ConcurrentSameToken(t *testing.T) {
+	env := newTestTokenEnv(t)
+	user := newSavedUser(t, env.svc, model.RoleUser)
+
+	_, refresh, err := env.tokens.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueTokenPair failed: %v", err)
+	}
+
+	type result struct {
+		err error
+	}
+	results := make(chan result, 2)
+
+	for range 2 {
+		go func() {
+			_, _, e := env.tokens.RefreshAccessToken(context.Background(), refresh, env.svc)
+			results <- result{err: e}
+		}()
+	}
+
+	r1, r2 := <-results, <-results
+	successes := 0
+	invalids := 0
+	for _, r := range []result{r1, r2} {
+		if r.err == nil {
+			successes++
+		} else if errors.Is(r.err, auth.ErrInvalidToken) {
+			invalids++
+		} else {
+			t.Errorf("unexpected error: %v", r.err)
+		}
+	}
+	if successes != 1 || invalids != 1 {
+		t.Errorf("expected exactly 1 success and 1 ErrInvalidToken, got %d successes and %d invalids", successes, invalids)
+	}
+}
+
 func TestRefreshAccessToken_InvalidToken(t *testing.T) {
 	env := newTestTokenEnv(t)
 

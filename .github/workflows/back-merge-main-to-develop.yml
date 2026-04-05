@@ -1,0 +1,47 @@
+name: Back-merge main → develop
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  back-merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if develop is behind main
+        id: check
+        run: |
+          git fetch origin
+          BEHIND=$(git log origin/develop..origin/main --oneline | wc -l)
+          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+          echo "develop is $BEHIND commit(s) behind main"
+
+      - name: Open back-merge PR if needed
+        if: steps.check.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING=$(gh pr list --base develop --head main --state open --json number --jq length)
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Back-merge PR already open, skipping."
+            exit 0
+          fi
+          gh pr create \
+            --base develop \
+            --head main \
+            --title "chore: back-merge main → develop" \
+            --body "$(cat <<'EOF'
+Automated back-merge after a direct merge to \`main\` (e.g. a docs-only PR).
+
+Keeps \`develop\` in sync so the next \`develop\` → \`main\` promotion is clean.
+
+**Merge strategy:** use **Create a merge commit** (not squash).
+EOF
+)"
