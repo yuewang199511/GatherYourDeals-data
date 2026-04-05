@@ -25,8 +25,16 @@ Before running any tests locally:
 3. If the service is already running and healthy, skip restore and startup — do not restart unnecessarily
 
 ## Remote test setup
-Do not touch local service or snapshot.
-Verify the remote service is healthy before running tests: `curl -sf {GYD_TARGET_URL}/health`
+**Railway and Azure load tests are always triggered via GitHub Actions — never run locally.**
+Before doing anything else for a remote test, check `.github/workflows/load-tests.yml` to understand how to trigger it.
+The correct command is:
+```bash
+gh workflow run load-tests.yml --ref <branch> -f provider=railway -f group=all -f phase=moderate
+```
+Do NOT attempt to create or populate `load_testing/.env` for remote tests — credentials are stored in GitHub Secrets and injected by CI.
+Do NOT look up Railway variables or hunt for credentials locally.
+
+Verify the remote service is healthy before triggering the workflow: `curl -sf {GYD_TARGET_URL}/health`
 If the health check fails, stop and report to the user — do not proceed.
 
 ## Remote seeding strategy
