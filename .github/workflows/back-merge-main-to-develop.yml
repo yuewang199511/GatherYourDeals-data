@@ -19,7 +19,7 @@ jobs:
         id: check
         run: |
           git fetch origin
-          BEHIND=$(git log origin/develop..origin/main --oneline | wc -l)
+          BEHIND=$(git rev-list --count origin/develop..origin/main)
           echo "behind=$BEHIND" >> $GITHUB_OUTPUT
           echo "develop is $BEHIND commit(s) behind main"
 
@@ -33,15 +33,9 @@ jobs:
             echo "Back-merge PR already open, skipping."
             exit 0
           fi
+          BODY=$(printf 'Automated back-merge after a direct merge to `main` (e.g. a docs-only PR).\n\nKeeps `develop` in sync so the next `develop` → `main` promotion is clean.\n\n**Merge strategy:** use **Create a merge commit** (not squash).')
           gh pr create \
             --base develop \
             --head main \
             --title "chore: back-merge main → develop" \
-            --body "$(cat <<'EOF'
-Automated back-merge after a direct merge to \`main\` (e.g. a docs-only PR).
-
-Keeps \`develop\` in sync so the next \`develop\` → \`main\` promotion is clean.
-
-**Merge strategy:** use **Create a merge commit** (not squash).
-EOF
-)"
+            --body "$BODY"
