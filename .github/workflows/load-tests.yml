@@ -75,7 +75,6 @@ jobs:
             echo "numReplicas = ${{ inputs.replicas }}" >> railway.toml
           fi
           railway up \
-            -p "7639518c-e0a7-4cd4-8227-6c2575458620" \
             -e "load-test" \
             -s "GatherYourDeals-data" \
             --detach
