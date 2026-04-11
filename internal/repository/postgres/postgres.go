@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"net/url"
 
 	"github.com/XSAM/otelsql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -19,9 +20,28 @@ type DB struct {
 	conn *sql.DB
 }
 
+// withSimpleProtocol appends default_query_exec_mode=simple_protocol to the DSN.
+// Required for PgBouncer transaction mode — prepared statements are not preserved
+// across connections in transaction mode, so pgx must use the simple wire protocol.
+// Safe to apply in session mode too (no functional difference, minor perf overhead).
+func withSimpleProtocol(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse DSN: %w", err)
+	}
+	q := u.Query()
+	q.Set("default_query_exec_mode", "simple_protocol")
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 // New opens a PostgreSQL database at the given DSN and runs migrations.
 // dsn may be a URI (postgres://...) or a key-value DSN (host=... port=...).
 func New(dsn string) (*DB, error) {
+	dsn, err := withSimpleProtocol(dsn)
+	if err != nil {
+		return nil, err
+	}
 	conn, err := otelsql.Open("pgx", dsn,
 		otelsql.WithAttributes(semconv.DBSystemPostgreSQL),
 		otelsql.WithSpanOptions(otelsql.SpanOptions{DisableQuery: true}),
