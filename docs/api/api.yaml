@@ -473,8 +473,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Missing refresh_token field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
-          description: Invalid or expired refresh token
+          description: Invalid, expired, revoked, or already-consumed refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Token store unavailable (e.g. Redis unreachable)
           content:
             application/json:
               schema:
