@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -354,6 +355,52 @@ func TestRefresh_ConsumedToken(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 on reuse of consumed token, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+func TestRefresh_StoreUnavailable_Returns503(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	userRepo := sqlite.NewUserRepo(db)
+	metaRepo := sqlite.NewMetaFieldRepo(db)
+	receiptRepo := sqlite.NewReceiptRepo(db, metaRepo)
+	authService := auth.NewService(userRepo)
+	tokens := auth.NewTokenService(
+		[]byte("test-secret-that-is-long-enough-32c"),
+		time.Hour,
+		7*24*time.Hour,
+		&failingRefreshStore{err: errors.New("redis: connection pool: failed to dial")},
+	)
+	authHandler := handler.NewAuthHandler(authService, tokens)
+	userHandler := handler.NewUserHandler(userRepo)
+	metaHandler := handler.NewMetaHandler(metaRepo)
+	receiptHandler := handler.NewReceiptHandler(receiptRepo)
+	r := handler.NewRouter(authHandler, userHandler, metaHandler, receiptHandler, tokens, nil, nil)
+
+	body := jsonBody(t, map[string]string{"refresh_token": "any-token"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 for store unavailable, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// failingRefreshStore returns a fixed infrastructure error from every method.
+type failingRefreshStore struct{ err error }
+
+func (s *failingRefreshStore) Save(_ context.Context, _, _ string, _ time.Time) error {
+	return s.err
+}
+func (s *failingRefreshStore) Find(_ context.Context, _ string) (string, error) {
+	return "", s.err
+}
+func (s *failingRefreshStore) Consume(_ context.Context, _ string) (string, error) {
+	return "", s.err
+}
+func (s *failingRefreshStore) Delete(_ context.Context, _ string) error { return s.err }
+func (s *failingRefreshStore) DeleteAllForUser(_ context.Context, _ string) error {
+	return s.err
 }
 
 // --- Me tests (additional) ---

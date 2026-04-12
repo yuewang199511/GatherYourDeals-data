@@ -277,6 +277,50 @@ func TestRefreshAccessToken_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestRefreshAccessToken_StoreError_NotWrappedAsErrInvalidToken(t *testing.T) {
+	storeErr := errors.New("redis: connection pool: failed to dial")
+	tokens := auth.NewTokenService(
+		[]byte("test-secret-that-is-long-enough-32c"),
+		time.Hour,
+		7*24*time.Hour,
+		&errRefreshStore{err: storeErr},
+	)
+
+	_, _, err := tokens.RefreshAccessToken(context.Background(), "any-token", &stubUserLookup{})
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatal("store infrastructure error must not be reported as ErrInvalidToken")
+	}
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("expected original store error to be propagated, got %v", err)
+	}
+}
+
+// errRefreshStore returns a fixed error from every method.
+type errRefreshStore struct{ err error }
+
+func (s *errRefreshStore) Save(_ context.Context, _, _ string, _ time.Time) error {
+	return s.err
+}
+func (s *errRefreshStore) Find(_ context.Context, _ string) (string, error) {
+	return "", s.err
+}
+func (s *errRefreshStore) Consume(_ context.Context, _ string) (string, error) {
+	return "", s.err
+}
+func (s *errRefreshStore) Delete(_ context.Context, _ string) error { return s.err }
+func (s *errRefreshStore) DeleteAllForUser(_ context.Context, _ string) error {
+	return s.err
+}
+
+type stubUserLookup struct{}
+
+func (s *stubUserLookup) GetUserByID(_ context.Context, _ string) (*model.User, error) {
+	return nil, errors.New("should not be called")
+}
+
 // --- RevokeRefreshToken ---
 
 func TestRevokeRefreshToken_PreventsReuse(t *testing.T) {
