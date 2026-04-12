@@ -96,8 +96,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 	access, refresh, err := h.tokens.RefreshAccessToken(c.Request.Context(), req.RefreshToken, h.service)
-	if err != nil {
+	if errors.Is(err, auth.ErrInvalidToken) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "token store unavailable"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

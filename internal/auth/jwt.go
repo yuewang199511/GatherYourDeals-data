@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -91,8 +92,11 @@ func (ts *TokenService) ValidateAccessToken(tokenStr string) (*Claims, error) {
 // calls both pass Find before either reaches Delete.
 func (ts *TokenService) RefreshAccessToken(ctx context.Context, refreshToken string, users UserLookup) (newAccess, newRefresh string, err error) {
 	userID, err := ts.store.Consume(ctx, refreshToken)
-	if err != nil {
+	if errors.Is(err, model.ErrInvalidToken) {
 		return "", "", ErrInvalidToken
+	}
+	if err != nil {
+		return "", "", err // infrastructure error (e.g. Redis unreachable) — propagate as-is
 	}
 
 	user, err := users.GetUserByID(ctx, userID)
